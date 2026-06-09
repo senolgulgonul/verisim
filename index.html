@@ -107,7 +107,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.14</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.15</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -493,18 +493,29 @@ function renderWave(){
     for(let k=0;k<vals.length;k++){
       const t0=vals[k][0], val=vals[k][1], t1=(k+1<vals.length)?vals[k+1][0]:tmax;
       if(t1<view0 || t0>view0+vw) continue;
-      const x0=X(t0), x1=X(t1), bad=/[xz]/i.test(val), col=bad?'var(--bad)':'var(--wave)';
+      const x0=X(t0), x1=X(t1), bad=/[xz]/i.test(val), isX=/x/i.test(val);
+      const fillU=isX?'#15191f':'#9aa3af', wv=Math.max(0,x1-x0);   // unknown fill: x dark, z gray
       if(v.width===1){
-        const yy=bad?y+ymid:(val==='1'?hi:lo);
-        add('line',{x1:x0,y1:yy,x2:x1,y2:yy,stroke:col,'stroke-width':1.5},G);
-        if(k>0) add('line',{x1:x0,y1:hi,x2:x0,y2:lo,stroke:col,'stroke-width':1,opacity:.6},G);
+        if(bad){
+          add('rect',{x:x0,y:hi,width:wv,height:lo-hi,fill:fillU,opacity:isX?.85:.45},G);
+        } else {
+          const yy=val==='1'?hi:lo;
+          add('line',{x1:x0,y1:yy,x2:x1,y2:yy,stroke:'var(--wave)','stroke-width':1.5},G);
+          if(k>0) add('line',{x1:x0,y1:hi,x2:x0,y2:lo,stroke:'var(--wave)','stroke-width':1,opacity:.6},G);
+        }
       } else {
-        add('line',{x1:x0+2,y1:hi,x2:x1-2,y2:hi,stroke:col,'stroke-width':1.4},G);
-        add('line',{x1:x0+2,y1:lo,x2:x1-2,y2:lo,stroke:col,'stroke-width':1.4},G);
-        add('line',{x1:x0,y1:y+ymid,x2:x0+2,y2:hi,stroke:col,'stroke-width':1.4},G);
-        add('line',{x1:x0,y1:y+ymid,x2:x0+2,y2:lo,stroke:col,'stroke-width':1.4},G);
-        if(x1-x0>26) add('text',{x:(x0+x1)/2,y:y+ymid+4,fill:'#15191f','font-size':11,'text-anchor':'middle'},G)
-          .textContent=fmt(v,val);
+        if(bad){
+          add('rect',{x:x0+1,y:hi,width:Math.max(0,wv-2),height:lo-hi,fill:fillU,opacity:isX?.8:.45},G);
+          if(x1-x0>20) add('text',{x:(x0+x1)/2,y:y+ymid+4,fill:'#fff','font-size':11,'text-anchor':'middle'},G)
+            .textContent=isX?'x':'z';
+        } else {
+          add('line',{x1:x0+2,y1:hi,x2:x1-2,y2:hi,stroke:'var(--wave)','stroke-width':1.4},G);
+          add('line',{x1:x0+2,y1:lo,x2:x1-2,y2:lo,stroke:'var(--wave)','stroke-width':1.4},G);
+          add('line',{x1:x0,y1:y+ymid,x2:x0+2,y2:hi,stroke:'var(--wave)','stroke-width':1.4},G);
+          add('line',{x1:x0,y1:y+ymid,x2:x0+2,y2:lo,stroke:'var(--wave)','stroke-width':1.4},G);
+          if(x1-x0>26) add('text',{x:(x0+x1)/2,y:y+ymid+4,fill:'#15191f','font-size':11,'text-anchor':'middle'},G)
+            .textContent=fmt(v,val);
+        }
       }
     }
   });
