@@ -8,7 +8,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Verisim — Verilog in your browser</title>
+<title>VeriSim — Verilog in your browser</title>
 
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
@@ -44,6 +44,9 @@
   #run .tri{font-size:11px}
 
   main{flex:1;display:flex;min-height:0}
+  #vsplit{flex:none;height:7px;background:var(--edge);cursor:row-resize;position:relative}
+  #vsplit::after{content:"";position:absolute;left:50%;top:2px;width:38px;height:3px;margin-left:-19px;border-radius:2px;background:#b8bfc9}
+  #vsplit:hover{background:var(--accent)} #vsplit:hover::after{background:#fff}
   .pane{flex:1;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--edge)}
   .pane:last-child{border-right:none}
   .pane h2{margin:0;padding:6px 12px;font-family:var(--mono);font-weight:500;font-size:12.5px;letter-spacing:.3px;
@@ -104,7 +107,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>veri<span>sim</span></b><span class="ver">v1.11</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.12</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -130,6 +133,7 @@
     <div class="editor"><textarea id="design" spellcheck="false"></textarea></div></section>
 </main>
 
+<div id="vsplit" title="Drag to resize"></div>
 <div id="bottom">
   <div class="tabs">
     <div class="tab active" data-v="console">Console</div>
@@ -541,6 +545,19 @@ window.addEventListener('mouseup',e=>{ if(!_drag)return;
   _drag=null; });
 $('#wfit').onclick=()=>{ viewSpan=null; view0=0; renderWave(); };
 window.addEventListener('resize',()=>{ if(WD) renderWave(); });
+
+/* drag the splitter to resize the console/waveform panel */
+(function(){
+  const split=$('#vsplit'), bottom=$('#bottom'); let dragging=false;
+  split.addEventListener('mousedown',e=>{ dragging=true; document.body.style.userSelect='none'; e.preventDefault(); });
+  window.addEventListener('mousemove',e=>{ if(!dragging) return;
+    const total=document.documentElement.clientHeight;
+    const h=Math.max(110, Math.min(total-150, total-e.clientY-3));
+    bottom.style.height=h+'px';
+  });
+  window.addEventListener('mouseup',()=>{ if(!dragging) return; dragging=false; document.body.style.userSelect='';
+    if(tbED) tbED.refresh(); if(dgED) dgED.refresh(); if(WD) renderWave(); });
+})();
 status('engine ready &mdash; press Run');
 </script>
 </body>
