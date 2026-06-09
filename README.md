@@ -90,4 +90,13 @@ To rebuild the WASM binary from source, you'll need [Emscripten](https://emscrip
 
 ## License
 
-Icarus Iverilog is licensed under the [GNU General Public License v2](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html). VeriSim's wrapper code is MIT licensed. See [LICENSE](LICENSE) for details.
+VeriSim is licensed under the [GNU General Public License v2](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html) (GPL-2.0), the same license as Icarus Iverilog which it is derived from.
+
+This means:
+- You are free to use, study, modify, and distribute VeriSim
+- Any derivative work or distribution must also be released under GPL-2.0
+- The full source code must be made available to anyone who receives the software
+
+Commercial use is permitted under these terms, but **any commercial distribution must remain open-source under GPL-2.0**. Proprietary or closed-source commercial use is not allowed without explicit written permission from the author.
+
+See [LICENSE](LICENSE) for the full license text.
