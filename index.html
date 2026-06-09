@@ -107,7 +107,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.13</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.14</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -163,6 +163,12 @@ import initIvl   from './ivl.js';
 import initVvp   from './vvp.js';
 const $ = s => document.querySelector(s);
 const escapeHtml = s => s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function sanitize(s){                                 // fix invisible/smart chars from slides (NBSP, smart quotes, zero-width)
+  return s.replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g,' ')
+          .replace(/[\u200B-\u200D\uFEFF]/g,'')
+          .replace(/[\u2018\u2019\u201A\u201B\u2032]/g,"'")
+          .replace(/[\u201C\u201D\u201E\u201F\u2033]/g,'"');
+}
 
 /* ---------- editors ---------- */
 let tbED,dgED;
@@ -354,10 +360,13 @@ async function run(){
   const g=$('#gen').value;
   try{
     status('preprocessing&hellip;');
-    const pp=await preprocessAll([{name:'design.v',src:getDesign()},{name:'tb.v',src:getTB()}]);
+    const d0=getDesign(), t0=getTB(), d=sanitize(d0), t=sanitize(t0);
+    if(d!==d0||t!==t0) log('Note: normalized non-standard characters from pasted text (non-breaking spaces / smart quotes).','sys');
+    const pp=await preprocessAll([{name:'design.v',src:d},{name:'tb.v',src:t}]);
     status('compiling&hellip;');
     const c=await compile(pp,g);
-    if(!c.vvp){ log(c.err||'Compilation failed.','err'); status('compile error'); show('console'); return; }
+    if(!c.vvp){ const e=c.err.split('\n').filter(l=>!/system\.vpi|dynamic linking not enabled/.test(l)).join('\n');
+      log(e||'Compilation failed.','err'); status('compile error'); show('console'); return; }
     const warn=c.err.split('\n').filter(l=>!/system\.vpi|dynamic linking not enabled/.test(l)).join('\n');
     if(warn.trim()) log(warn,'warn');
     status('simulating&hellip;');
