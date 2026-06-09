@@ -1,5 +1,8 @@
 # VeriSim
 
+[![GitHub stars](https://img.shields.io/github/stars/senolgulgonul/verisim?style=social)](https://github.com/senolgulgonul/verisim/stargazers)
+[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
+
 **Browser-based Verilog simulator — no installation required.**
 
 🔗 **[Try it live → senolgulgonul.github.io/verisim](https://senolgulgonul.github.io/verisim)**
