@@ -1,96 +1,71 @@
 # VeriSim
 
-[![GitHub stars](https://img.shields.io/github/stars/senolgulgonul/verisim?style=social)](https://github.com/senolgulgonul/verisim/stargazers)
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
+**Verilog in your browser — fully client-side.**
+A browser-based Verilog simulator built by compiling [Icarus Verilog](https://github.com/steveicarus/iverilog) to WebAssembly. No server, no install: edit, compile, simulate, and view waveforms entirely in the page.
 
-**Browser-based Verilog simulator — no installation required.**
-
-🔗 **[Try it live → senolgulgonul.github.io/verisim](https://senolgulgonul.github.io/verisim)**
+**Live:** https://senolgulgonul.github.io/verisim/
 
 ---
 
-## What is VeriSim?
+## Ported toolchain
 
-VeriSim is a fully client-side Verilog simulator built by compiling [Icarus Iverilog](https://github.com/steveicarus/iverilog) to [WebAssembly](https://webassembly.org/). It runs entirely in your browser — no backend, no installation, no dependencies.
+VeriSim runs **Icarus Verilog version 14.0 (devel)**, compiled from the project's `master` branch (the development line after the 13.0 release) to WebAssembly with [Emscripten](https://emscripten.org/).
 
-Write Verilog, simulate, and see results instantly.
+Icarus Verilog is three cooperating programs; each is shipped here as a separate WebAssembly module:
 
----
+| Program | Role | Module |
+|---|---|---|
+| `ivlpp` | preprocessor (macros, includes, `` `line `` directives) | `ivlpp.wasm` / `ivlpp.js` |
+| `ivl`   | compiler — elaborates Verilog and emits a `.vvp` program | `ivl.wasm` / `ivl.js` |
+| `vvp`   | runtime — executes the `.vvp` program, writes the VCD | `vvp.wasm` / `vvp.js` |
+
+## How it works
+
+A normal Icarus install runs these as separate OS processes and loads its code-generator and VPI system tasks at runtime with `dlopen`. Neither process spawning nor `dlopen` exists in the browser, so the port:
+
+- **Orchestrates the three stages in JavaScript** instead of the `iverilog` driver. Files are passed between stages through Emscripten's in-memory filesystem (MEMFS).
+- **Statically links the back end into the compiler** — the `vvp` code generator (`tgt-vvp`) is linked directly into `ivl`, and the `ivl_dlopen` / `ivl_dlsym` calls that would have loaded it are bypassed.
+- **Statically links the VPI system tasks into the runtime** — `system.vpi` (`$display`, `$monitor`, `$dumpvars`, `$finish`, …) is linked into `vvp`, and its dynamic-module loader is short-circuited to call the built-in startup routine.
+- **Preprocesses both sources in a single `ivlpp` pass** so cross-file `` `define `` works, with `` `line `` directives preserved so errors map back to the right file and line.
+
+Simulation results are read back as a VCD file and rendered by a custom in-page waveform viewer.
 
 ## Features
 
-- ✅ Full Icarus Iverilog toolchain compiled to WASM
-- ✅ Runs 100% in the browser — nothing to install
-- ✅ Supports standard Verilog (IEEE 1364)
-- ✅ `$display`, `$monitor`, `$dumpfile` / `$dumpvars` (VCD output)
-- ✅ Works offline after first load
-- ✅ Zero friction — share a design, just send a link
+- Two editors (testbench + design), syntax highlighting, examples, open / save / clear per pane.
+- One-click compile + simulate; console shows `$display` / `$monitor` output and compiler diagnostics.
+- Waveform viewer: scroll to zoom, drag to pan, click to place a time cursor with per-signal value readout.
+- Pick which signals to plot, in the order you choose; scope-qualified names (`tb.clk` vs `tb.dut.clk`).
+- **Timescale-aware time display** following GTKWave conventions — values shown in the coarsest exact unit (e.g. `17 ns`, otherwise `17560 ps`); axis ticks on clean steps.
+- Unknown (`x`) drawn as a solid block and high-impedance (`z`) as a shaded band, GTKWave-style.
+- Pasted code is normalized for non-breaking spaces and smart quotes (handy when copying from lecture slides).
+- Language generation selectable: Verilog-2005 / 2009 / SystemVerilog-2012.
 
----
+## Running locally
 
-## Quick Start
+It is a static site — any HTTP server works (the `file://` protocol does **not**, because of ES modules and WebAssembly fetch). Keep all files together:
 
-1. Open **[senolgulgonul.github.io/verisim](https://senolgulgonul.github.io/verisim)**
-2. Write or paste your Verilog source
-3. Click **Simulate**
-4. View the console output or waveform dump
-
-No account, no signup, no install.
-
----
-
-## Example
-
-```verilog
-module hello;
-  initial begin
-    $display("Hello from VeriSim!");
-    #10 $finish;
-  end
-endmodule
 ```
-
----
-
-## How It Was Built
-
-VeriSim ports Icarus Iverilog to the browser via Emscripten/WASM:
-
-- **Icarus Iverilog** is the open-source Verilog simulation and synthesis tool by Stephen Williams.
-- The toolchain (`iverilog` + `vvp`) is compiled to WebAssembly using [Emscripten](https://emscripten.org/).
-- The compiled WASM module is loaded and driven by a thin JavaScript layer in the browser.
-- No server-side execution — everything happens on the client.
-
----
-
-## Limitations
-
-- Synthesizable / behavioral Verilog is well supported; some SystemVerilog features may not be available depending on the Icarus version compiled.
-- File I/O beyond VCD dumps is not supported in the browser sandbox.
-- Very large simulations may be slow compared to a native build.
-
----
-
-## Local Development
+index.html
+ivlpp.js  ivlpp.wasm
+ivl.js    ivl.wasm
+vvp.js    vvp.wasm
+```
 
 ```bash
-git clone https://github.com/senolgulgonul/verisim
-cd verisim
-# Serve locally (any static file server works)
-npx serve .
+python3 -m http.server 8090
+# then open http://localhost:8090/
 ```
 
-To rebuild the WASM binary from source, you'll need [Emscripten](https://emscripten.org/docs/getting_started/downloads.html) installed. Build instructions are in [`wasm/BUILD.md`](wasm/BUILD.md).
+## License & attribution
+
+VeriSim bundles WebAssembly binaries built from **Icarus Verilog**, which is licensed under the **GNU General Public License, version 2 or later**. The compiled modules (`ivl.wasm`, `vvp.wasm`, `ivlpp.wasm`) are derivative works of that source, so they remain under the GPL, and this project is distributed under GPL-compatible terms.
+
+- Icarus Verilog © Stephen Williams and contributors — https://github.com/steveicarus/iverilog
+- Full license text: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+
+The corresponding Icarus Verilog source (and the Emscripten build steps / patches used to produce the modules) is the `master` branch of the upstream repository at version 14.0 (devel).
 
 ---
 
-## Credits
-
-- [Icarus Iverilog](https://github.com/steveicarus/iverilog) — Stephen Williams & contributors
-- [Emscripten](https://emscripten.org/) — WASM compilation toolchain
-
----
-
-## License
-
-VeriSim is licensed under the [GNU General Public License v2](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html) (GPL-2.0), the same license as Icarus Iverilog which it is derived from.
+*Built and maintained by [@senolgulgonul](https://github.com/senolgulgonul).*
