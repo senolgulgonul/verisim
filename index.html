@@ -122,7 +122,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.23</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.24</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -484,22 +484,24 @@ async function synthesize(mode){
   if(key!==synSrc){ synCache={gates:null,rtl:null}; synSrc=key; }            // editor/gen changed → stale cache
   if(synCache[mode]){ renderNetlist(synCache[mode], mode); return; }          // cache hit
   synBusy=true; $('#synRun').disabled=true;
+  let logBuf='';
   try{
     const run = await loadYosys();
     synInfo('Synthesizing ('+mode+')…');
-    let logBuf='';
     const readCmd=(gen==='2005'?'read_verilog design.v; ':'read_verilog -sv design.v; ');  // match the sim's language setting
     const out = await run(['-q','-p',readCmd+SYN_SCRIPT[mode]],
       { 'design.v': new TextEncoder().encode(src) },
       { stdout:x=>{ logBuf+=synBytesToStr(x); }, stderr:x=>{ logBuf+=synBytesToStr(x); } });
     const raw = out && out['out.json'];
-    if(!raw) throw new Error(/error/i.test(logBuf) ? logBuf.split('\n').filter(l=>/error/i.test(l)).join(' ') : 'no netlist produced');
+    if(!raw) throw new Error('no netlist produced');
     const netlist = JSON.parse(synBytesToStr(raw));
     synCache[mode]=netlist;
     renderNetlist(netlist, mode);
   }catch(e){
-    synEmpty('Synthesis error: '+escapeHtml(e&&e.message||String(e))
-      +'<br><span class="dim">Only design.v is synthesized (not the testbench). Non-synthesizable constructs (#delays, $display, initial) can\'t be synthesized.</span>');
+    const errLines = logBuf.split('\n').filter(l=>/error/i.test(l)).slice(0,8).join('\n').trim();
+    const msg = errLines || (e&&e.message) || String(e);   // prefer Yosys's own error lines
+    synEmpty('<b>Synthesis error</b><br><pre style="white-space:pre-wrap;margin:6px 0;font-size:11px">'+escapeHtml(msg)+'</pre>'
+      +'<span class="dim">Only design.v is synthesized (not the testbench). Non-synthesizable constructs (#delays, $display, initial) can\'t be synthesized.</span>');
     synInfo('');
   }
   finally{ synBusy=false; $('#synRun').disabled=false; }
