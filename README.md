@@ -1,7 +1,7 @@
 # VeriSim
 
 **Verilog in your browser — fully client-side.**
-A browser-based Verilog simulator built by compiling [Icarus Verilog](https://github.com/steveicarus/iverilog) to WebAssembly. No server, no install: edit, compile, simulate, and view waveforms entirely in the page.
+A browser-based Verilog simulator built by compiling [Icarus Verilog](https://github.com/steveicarus/iverilog) to WebAssembly. No server, no install: edit, compile, simulate, view waveforms, and synthesize to a gate-level or RTL schematic — entirely in the page.
 
 **Live:** https://senolgulgonul.github.io/verisim/
 
@@ -40,6 +40,10 @@ Simulation results are read back as a VCD file and rendered by a custom in-page 
 - Unknown (`x`) drawn as a solid block and high-impedance (`z`) as a shaded band, GTKWave-style.
 - Pasted code is normalized for non-breaking spaces and smart quotes (handy when copying from lecture slides).
 - Language generation selectable: Verilog-2005 / 2009 / SystemVerilog-2012.
+- **Synthesis + schematic** — synthesize `design.v` with [Yosys](https://github.com/YosysHQ/yosys) (loaded on demand via [YoWASP](https://yowasp.org/)) and view it as a circuit drawn by [netlistsvg](https://github.com/nturley/netlistsvg):
+  - **Gates** view — combinational logic mapped to **AND / OR / NOT** only (matching truth-table / Karnaugh-map teaching), with flip-flops kept whole as DFF blocks.
+  - **RTL** view — word-level operator blocks (`$add`, `$mux`, `$adff`, …) with module hierarchy preserved.
+  - Pan / zoom on the schematic: scroll to zoom, drag to pan, double-click to fit.
 
 ## Running locally
 
@@ -50,7 +54,18 @@ index.html
 ivlpp.js  ivlpp.wasm
 ivl.js    ivl.wasm
 vvp.js    vvp.wasm
+elk.bundled.js          # schematic layout engine (netlistsvg dependency)
+netlistsvg.bundle.js    # schematic renderer
 ```
+
+The two schematic bundles are self-hosted; grab them from the [netlistsvg](https://github.com/nturley/netlistsvg) project:
+
+```bash
+curl -L -o elk.bundled.js       https://nturley.github.io/netlistsvg/elk.bundled.js
+curl -L -o netlistsvg.bundle.js https://nturley.github.io/netlistsvg/built/netlistsvg.bundle.js
+```
+
+The simulator runs fully offline. The **Synthesize** tab additionally needs those two local bundles for rendering, and fetches the Yosys WebAssembly (~8 MB) from a CDN the first time you synthesize (cached by the browser thereafter).
 
 ```bash
 python3 -m http.server 8090
@@ -65,6 +80,12 @@ VeriSim bundles WebAssembly binaries built from **Icarus Verilog**, which is lic
 - Full license text: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
 The corresponding Icarus Verilog source (and the Emscripten build steps / patches used to produce the modules) is the `master` branch of the upstream repository at version 14.0 (devel).
+
+The **Synthesize** feature relies on three additional open-source projects, loaded as-is (not modified):
+
+- **Yosys** © Claire Xenia Wolf and contributors — synthesis engine, [ISC license](https://github.com/YosysHQ/yosys/blob/main/COPYING). Delivered to the browser via [YoWASP](https://yowasp.org/).
+- **netlistsvg** © Neil Turley and contributors — schematic renderer, [MIT license](https://github.com/nturley/netlistsvg).
+- **Eclipse Layout Kernel (ELK)** — diagram layout used by netlistsvg, [EPL-2.0](https://github.com/eclipse/elk).
 
 ---
 
