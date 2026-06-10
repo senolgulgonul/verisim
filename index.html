@@ -120,14 +120,15 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.19</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.20</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
     <option value="gate">Gate-Level &mdash; Half Adder</option>
     <option value="dataflow">Dataflow &mdash; Half Adder</option>
     <option value="behavioral">Behavioral &mdash; Half Adder</option>
-    <option value="counter">Counter &mdash; 4-bit (sequential)</option>
+    <option value="shiftreg">Shift Register &mdash; 4-bit (sequential)</option>
+    <option value="counter2">Counter &mdash; 2-bit (sequential)</option>
   </select>
   <select id="gen" title="Language generation">
     <option value="2005" selected>Verilog-2005</option>
@@ -288,34 +289,66 @@ module half_adder(input a, input b, output reg s, output reg c);
   end
 endmodule
 ` },
-  counter: {
+  shiftreg: {
     design:
 `\`timescale 1ns/1ps
-// Sequential logic: 4-bit counter with asynchronous reset
-module counter(input clk, input rst, output reg [3:0] q);
+// 4-bit shift register (serial in, parallel out) — pure DFF chain
+module shiftreg(input wire clk, input wire rst, input wire din,
+                output reg q0, output reg q1, output reg q2, output reg q3);
   always @(posedge clk or posedge rst)
-    if (rst) q <= 4'd0;
-    else     q <= q + 4'd1;
+    if (rst) begin q0<=0; q1<=0; q2<=0; q3<=0; end
+    else     begin q0<=din; q1<=q0; q2<=q1; q3<=q2; end   // shift one stage per clock
 endmodule
 `,
     tb:
 `\`timescale 1ns/1ps
 module tb;
-  reg clk = 0, rst = 1;
-  wire [3:0] q;
+  reg clk = 0, rst = 1, din = 0;
+  wire q0, q1, q2, q3;
 
-  counter dut(.clk(clk), .rst(rst), .q(q));
+  shiftreg dut(.clk(clk), .rst(rst), .din(din), .q0(q0), .q1(q1), .q2(q2), .q3(q3));
 
   always #5 clk = ~clk;          // 10 ns clock
 
   initial begin
     $dumpfile("dump.vcd");
     $dumpvars(0, tb);
-    $display("=== 4-bit Counter ===");
-    $monitor("t=%0d ns  rst=%b q=%0d", $time, rst, q);
+    $display(" t    din  q3q2q1q0");
+    $monitor("%3d    %b    %b%b%b%b", $time, din, q3, q2, q1, q0);
     #12 rst = 0;
-    #80 $display("final q = %0d", q);
-    $finish;
+    din=1; #10 din=0; #10 din=1; #10 din=1; #10 din=0;   // push pattern 1,0,1,1
+    #60 $finish;
+  end
+endmodule
+`
+  },
+  counter2: {
+    design:
+`\`timescale 1ns/1ps
+// 2-bit synchronous counter with asynchronous reset
+module counter2(input wire clk, input wire rst, output reg q0, output reg q1);
+  always @(posedge clk or posedge rst)
+    if (rst) {q1,q0} <= 2'b0;
+    else     {q1,q0} <= {q1,q0} + 2'b1;
+endmodule
+`,
+    tb:
+`\`timescale 1ns/1ps
+module tb;
+  reg clk = 0, rst = 1;
+  wire q0, q1;
+
+  counter2 dut(.clk(clk), .rst(rst), .q0(q0), .q1(q1));
+
+  always #5 clk = ~clk;          // 10 ns clock
+
+  initial begin
+    $dumpfile("dump.vcd");
+    $dumpvars(0, tb);
+    $display(" t    q1q0");
+    $monitor("%3d    %b%b", $time, q1, q0);
+    #12 rst = 0;
+    #80 $finish;
   end
 endmodule
 ` }
