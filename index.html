@@ -122,7 +122,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.22</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.23</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -459,7 +459,7 @@ $('#dlvcd').onclick=()=>{ if(!lastVCD)return; const a=document.createElement('a'
 /* ============ synthesis (Yosys via YoWASP) + schematic (netlistsvg) ============ */
 let yosysRun=null, synMode='gates', synActivated=false, synBusy=false, synSrc='', synCache={gates:null,rtl:null};
 const SYN_SCRIPT={                                    // verified with native yosys 0.33
-  gates:'synth -auto-top -flatten; abc -g AND,OR; opt_clean; write_json out.json',  // AND/OR/NOT only (SOP — truth-table/K-map style)
+  gates:'synth -auto-top -flatten; delete t:$scopeinfo; abc -g AND,OR; opt_clean; write_json out.json',  // AND/OR/NOT only (SOP — truth-table/K-map style)
   rtl:  'prep -auto-top; write_json out.json'                                       // word-level blocks, hierarchy kept
 };
 const synInfo = t => { $('#synstat').textContent = t; };
@@ -510,7 +510,8 @@ async function renderNetlist(netlist, mode){
   }
   const cells={}; let latch=false; const mods=netlist.modules||{};
   for(const mn in mods){ const cs=mods[mn].cells||{};
-    for(const cn in cs){ const ty=cs[cn].type||''; if(/dlatch/i.test(ty)) latch=true;
+    for(const cn in cs){ const ty=cs[cn].type||''; if(/scopeinfo/i.test(ty)) continue;
+      if(/dlatch/i.test(ty)) latch=true;
       const t=ty.replace(/^\$_?/,'').replace(/_$/,''); cells[t]=(cells[t]||0)+1; } }
   const summary=Object.entries(cells).sort().map(([k,v])=>v+'×'+k).join('  ');
   try{
