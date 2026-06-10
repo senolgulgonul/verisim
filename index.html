@@ -13,6 +13,9 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/verilog/verilog.min.js"></script>
+<!-- schematic renderer: self-hosted bundles (download from https://nturley.github.io/netlistsvg/ — elk MUST load before netlistsvg) -->
+<script src="elk.bundled.js"></script>
+<script src="netlistsvg.bundle.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -85,6 +88,16 @@
 
   /* waveform view: signal list + zoomable plot */
   #wave{padding:0;overflow:hidden}
+  #synth.active{display:flex;flex-direction:column;overflow:hidden}
+  #stools{display:flex;align-items:center;gap:12px;padding:7px 12px;border-bottom:1px solid var(--edge);background:#f3f5f8;flex:none}
+  #stools .seg{display:inline-flex;border:1px solid var(--edge);border-radius:6px;overflow:hidden}
+  #stools .seg button{border:none;background:#fff;color:var(--ink-dim);font-family:var(--mono);font-size:11px;padding:4px 12px;cursor:pointer}
+  #stools .seg button.on{background:var(--accent);color:#fff}
+  #stools #synRun{border:1px solid var(--edge);background:#fff;color:var(--ink-dim);font-family:var(--mono);font-size:11px;border-radius:6px;padding:4px 12px;cursor:pointer}
+  #stools #synRun:hover{border-color:var(--accent);color:var(--accent)}
+  #synarea{flex:1;min-height:0;overflow:hidden;padding:0;background:#fff;position:relative;cursor:grab}
+  #synarea svg{display:block;user-select:none}
+  #synarea .empty{padding:12px}
   #wave.active{display:flex}
   #siglist{width:204px;flex:none;overflow:auto;border-right:1px solid var(--edge);background:#fafbfc;display:none;font-family:var(--mono);font-size:12px}
   #siglist .sl-head{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;color:var(--ink-dim);
@@ -107,7 +120,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.15</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.19</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -138,6 +151,7 @@
   <div class="tabs">
     <div class="tab active" data-v="console">Console</div>
     <div class="tab" data-v="wave">Waveform</div>
+    <div class="tab" data-v="synth">Synth</div>
     <div class="spacer"></div>
     <a class="act" id="dlvcd" style="display:none">&darr; dump.vcd</a>
     <div class="stat" id="stat">engine idle</div>
@@ -154,6 +168,15 @@
       </div>
       <div id="wavearea"><div class="empty">Run a simulation to see waveforms.</div></div>
     </div>
+  </div>
+  <div id="synth" class="view">
+    <div id="stools">
+      <span class="seg"><button id="synGates" class="on">Gates</button><button id="synRTL">RTL</button></span>
+      <button id="synRun">Synthesize</button>
+      <span class="hint">scroll = zoom &middot; drag = pan &middot; dbl-click = fit</span>
+      <span class="hint" id="synstat"></span>
+    </div>
+    <div id="synarea"><div class="empty">Press <b>Synthesize</b> to see the synthesized circuit of design.v (gate-level or RTL).</div></div>
   </div>
 </div>
 
@@ -388,13 +411,103 @@ async function run(){
 function show(v){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.v===v));
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
-  $('#'+(v==='wave'?'wave':'console')).classList.add('active');
+  const id = v==='wave'?'wave':v==='synth'?'synth':'console';
+  $('#'+id).classList.add('active');
   if(v==='wave' && WD) renderWave();   // fix: correct width once the tab is visible
+  if(v==='synth' && synActivated) synthesize(synMode);
 }
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>show(t.dataset.v));
 $('#run').onclick=run;
 $('#dlvcd').onclick=()=>{ if(!lastVCD)return; const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([lastVCD],{type:'text/plain'})); a.download='dump.vcd'; a.click(); URL.revokeObjectURL(a.href); };
+
+/* ============ synthesis (Yosys via YoWASP) + schematic (netlistsvg) ============ */
+let yosysRun=null, synMode='gates', synActivated=false, synSrc='', synCache={gates:null,rtl:null};
+const SYN_SCRIPT={                                    // verified with native yosys 0.33
+  gates:'synth; abc -g AND,OR; opt_clean; write_json out.json',  // AND/OR/NOT only (SOP — truth-table/K-map style)
+  rtl:  'prep; write_json out.json'                                       // word-level blocks
+};
+const synInfo = t => { $('#synstat').textContent = t; };
+const synEmpty = h => { $('#synarea').innerHTML = '<div class="empty">'+h+'</div>'; };
+function synBytesToStr(x){ if(typeof x==='string') return x;
+  try{ return new TextDecoder().decode(x instanceof Uint8Array ? x : new Uint8Array(x)); }
+  catch(_){ try{ return new TextDecoder().decode(Uint8Array.from(Object.values(x))); }catch(__){ return String(x); } } }
+
+async function loadYosys(){
+  if(yosysRun) return yosysRun;
+  synInfo('Loading Yosys (YoWASP, ~8 MB)…');
+  const m = await import('https://cdn.jsdelivr.net/npm/@yowasp/yosys/gen/bundle.js');
+  yosysRun = m.runYosys; return yosysRun;
+}
+async function synthesize(mode){
+  synActivated=true;
+  const src = sanitize(getDesign());
+  if(src.replace(/\/\/[^\n]*/g,'').replace(/\/\*[\s\S]*?\*\//g,'').trim()===''){ synEmpty('design.v is empty — write a module first.'); return; }
+  if(src!==synSrc){ synCache={gates:null,rtl:null}; synSrc=src; }           // editor changed → stale cache
+  if(synCache[mode]){ renderNetlist(synCache[mode], mode); return; }          // cache hit
+  try{
+    const run = await loadYosys();
+    synInfo('Synthesizing ('+mode+')…');
+    let logBuf='';
+    const out = await run(['design.v','-q','-p',SYN_SCRIPT[mode]],
+      { 'design.v': new TextEncoder().encode(src) },
+      { stdout:x=>{ logBuf+=synBytesToStr(x); }, stderr:x=>{ logBuf+=synBytesToStr(x); } });
+    const raw = out && out['out.json'];
+    if(!raw) throw new Error(/error/i.test(logBuf) ? logBuf.split('\n').filter(l=>/error/i.test(l)).join(' ') : 'no netlist produced');
+    const netlist = JSON.parse(synBytesToStr(raw));
+    synCache[mode]=netlist;
+    renderNetlist(netlist, mode, /latch/i.test(logBuf));
+  }catch(e){
+    synEmpty('Synthesis error: '+escapeHtml(e&&e.message||String(e))
+      +'<br><span class="dim">Only design.v is synthesized (not the testbench). Non-synthesizable constructs (#delays, $display, initial) can\'t be synthesized.</span>');
+    synInfo('');
+  }
+}
+async function renderNetlist(netlist, mode, latch){
+  if(typeof netlistsvg==='undefined' || typeof ELK==='undefined'){
+    synEmpty('Schematic renderer not loaded. Download <b>elk.bundled.js</b> and <b>netlistsvg.bundle.js</b> from nturley.github.io/netlistsvg and place them next to index.html.'); return;
+  }
+  const cells={}; const mods=netlist.modules||{};
+  for(const mn in mods){ const cs=mods[mn].cells||{};
+    for(const cn in cs){ const t=(cs[cn].type||'').replace(/^\$_?/,'').replace(/_$/,''); cells[t]=(cells[t]||0)+1; } }
+  const summary=Object.entries(cells).sort().map(([k,v])=>v+'×'+k).join('  ');
+  try{
+    const svg = await netlistsvg.render(netlistsvg.digitalSkin, netlist);
+    $('#synarea').innerHTML = svg;
+    const el=$('#synarea').querySelector('svg'); if(el) synAttach(el);
+    synInfo((mode==='gates'?'Gates':'RTL')+(summary?'  ·  '+summary:'')+(latch?'   ⚠ latch inferred':''));
+  }catch(e){ synEmpty('Render error: '+escapeHtml(e&&e.message||String(e))); }
+}
+function setSynMode(m){ synMode=m; $('#synGates').classList.toggle('on',m==='gates'); $('#synRTL').classList.toggle('on',m==='rtl'); if(synActivated) synthesize(m); }
+$('#synRun').onclick=()=>{ synSrc=''; synthesize(synMode); };               // force fresh synth
+$('#synGates').onclick=()=>setSynMode('gates');
+$('#synRTL').onclick=()=>setSynMode('rtl');
+
+/* pan + zoom on the schematic (CSS transform) */
+let synSVG=null, synZ=1, synPX=0, synPY=0, synDrag=false, synDX=0, synDY=0;
+function synApply(){ if(synSVG) synSVG.style.transform='translate('+synPX+'px,'+synPY+'px) scale('+synZ+')'; }
+function synFit(){
+  if(!synSVG) return; const area=$('#synarea');
+  const aw=area.clientWidth, ah=area.clientHeight;
+  const sw=parseFloat(synSVG.getAttribute('width'))||(synSVG.getBBox&&synSVG.getBBox().width)||aw;
+  const sh=parseFloat(synSVG.getAttribute('height'))||(synSVG.getBBox&&synSVG.getBBox().height)||ah;
+  synZ = Math.min((aw-24)/sw, (ah-24)/sh, 1) || 1;
+  synPX = Math.max(12,(aw - sw*synZ)/2); synPY = 12;
+  synApply();
+}
+function synAttach(svg){ synSVG=svg; svg.style.transformOrigin='0 0'; synFit(); }
+(function(){
+  const area=$('#synarea'); if(!area) return;
+  area.addEventListener('wheel', e=>{ if(!synSVG) return; e.preventDefault();
+    const r=area.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+    const f = e.deltaY<0 ? 1.1 : 1/1.1;
+    synPX = mx-(mx-synPX)*f; synPY = my-(my-synPY)*f; synZ *= f; synApply();
+  }, {passive:false});
+  area.addEventListener('mousedown', e=>{ if(!synSVG) return; synDrag=true; synDX=e.clientX-synPX; synDY=e.clientY-synPY; area.style.cursor='grabbing'; e.preventDefault(); });
+  window.addEventListener('mousemove', e=>{ if(!synDrag) return; synPX=e.clientX-synDX; synPY=e.clientY-synDY; synApply(); });
+  window.addEventListener('mouseup', ()=>{ if(synDrag){ synDrag=false; area.style.cursor='grab'; } });
+  area.addEventListener('dblclick', ()=>{ synFit(); });
+})();
 
 /* ============ VCD parse + signal list + zoomable waveform ============ */
 function parseVCD(text){
