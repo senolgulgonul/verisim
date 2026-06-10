@@ -8,6 +8,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="VeriSim — Verilog simulator and synthesizer in your browser. Icarus Verilog and Yosys compiled to WebAssembly: edit, simulate, view waveforms, and see gate-level or RTL schematics. No install, no server.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231b6ef3'/%3E%3Cpath d='M8 7l8 18L24 7h-4.4L16 17.4 12.4 7z' fill='%23fff'/%3E%3C/svg%3E">
 <title>VeriSim — Verilog in your browser</title>
 
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
@@ -120,7 +122,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.21</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.22</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -455,10 +457,10 @@ $('#dlvcd').onclick=()=>{ if(!lastVCD)return; const a=document.createElement('a'
   a.href=URL.createObjectURL(new Blob([lastVCD],{type:'text/plain'})); a.download='dump.vcd'; a.click(); URL.revokeObjectURL(a.href); };
 
 /* ============ synthesis (Yosys via YoWASP) + schematic (netlistsvg) ============ */
-let yosysRun=null, synMode='gates', synActivated=false, synSrc='', synCache={gates:null,rtl:null};
+let yosysRun=null, synMode='gates', synActivated=false, synBusy=false, synSrc='', synCache={gates:null,rtl:null};
 const SYN_SCRIPT={                                    // verified with native yosys 0.33
-  gates:'synth; abc -g AND,OR; opt_clean; write_json out.json',  // AND/OR/NOT only (SOP — truth-table/K-map style)
-  rtl:  'prep; write_json out.json'                                       // word-level blocks
+  gates:'synth -auto-top -flatten; abc -g AND,OR; opt_clean; write_json out.json',  // AND/OR/NOT only (SOP — truth-table/K-map style)
+  rtl:  'prep -auto-top; write_json out.json'                                       // word-level blocks, hierarchy kept
 };
 const synInfo = t => { $('#synstat').textContent = t; };
 const synEmpty = h => { $('#synarea').innerHTML = '<div class="empty">'+h+'</div>'; };
@@ -474,41 +476,48 @@ async function loadYosys(){
 }
 async function synthesize(mode){
   synActivated=true;
+  if(synBusy) return;                                                        // reentrancy guard
   const src = sanitize(getDesign());
   if(src.replace(/\/\/[^\n]*/g,'').replace(/\/\*[\s\S]*?\*\//g,'').trim()===''){ synEmpty('design.v is empty — write a module first.'); return; }
-  if(src!==synSrc){ synCache={gates:null,rtl:null}; synSrc=src; }           // editor changed → stale cache
+  const gen=$('#gen').value;
+  const key=gen+'\u0000'+src;                                                // generation affects parsing
+  if(key!==synSrc){ synCache={gates:null,rtl:null}; synSrc=key; }            // editor/gen changed → stale cache
   if(synCache[mode]){ renderNetlist(synCache[mode], mode); return; }          // cache hit
+  synBusy=true; $('#synRun').disabled=true;
   try{
     const run = await loadYosys();
     synInfo('Synthesizing ('+mode+')…');
     let logBuf='';
-    const out = await run(['design.v','-q','-p',SYN_SCRIPT[mode]],
+    const readCmd=(gen==='2005'?'read_verilog design.v; ':'read_verilog -sv design.v; ');  // match the sim's language setting
+    const out = await run(['-q','-p',readCmd+SYN_SCRIPT[mode]],
       { 'design.v': new TextEncoder().encode(src) },
       { stdout:x=>{ logBuf+=synBytesToStr(x); }, stderr:x=>{ logBuf+=synBytesToStr(x); } });
     const raw = out && out['out.json'];
     if(!raw) throw new Error(/error/i.test(logBuf) ? logBuf.split('\n').filter(l=>/error/i.test(l)).join(' ') : 'no netlist produced');
     const netlist = JSON.parse(synBytesToStr(raw));
     synCache[mode]=netlist;
-    renderNetlist(netlist, mode, /latch/i.test(logBuf));
+    renderNetlist(netlist, mode);
   }catch(e){
     synEmpty('Synthesis error: '+escapeHtml(e&&e.message||String(e))
       +'<br><span class="dim">Only design.v is synthesized (not the testbench). Non-synthesizable constructs (#delays, $display, initial) can\'t be synthesized.</span>');
     synInfo('');
   }
+  finally{ synBusy=false; $('#synRun').disabled=false; }
 }
-async function renderNetlist(netlist, mode, latch){
+async function renderNetlist(netlist, mode){
   if(typeof netlistsvg==='undefined' || typeof ELK==='undefined'){
     synEmpty('Schematic renderer not loaded. Download <b>elk.bundled.js</b> and <b>netlistsvg.bundle.js</b> from nturley.github.io/netlistsvg and place them next to index.html.'); return;
   }
-  const cells={}; const mods=netlist.modules||{};
+  const cells={}; let latch=false; const mods=netlist.modules||{};
   for(const mn in mods){ const cs=mods[mn].cells||{};
-    for(const cn in cs){ const t=(cs[cn].type||'').replace(/^\$_?/,'').replace(/_$/,''); cells[t]=(cells[t]||0)+1; } }
+    for(const cn in cs){ const ty=cs[cn].type||''; if(/dlatch/i.test(ty)) latch=true;
+      const t=ty.replace(/^\$_?/,'').replace(/_$/,''); cells[t]=(cells[t]||0)+1; } }
   const summary=Object.entries(cells).sort().map(([k,v])=>v+'×'+k).join('  ');
   try{
     const svg = await netlistsvg.render(netlistsvg.digitalSkin, netlist);
     $('#synarea').innerHTML = svg;
     const el=$('#synarea').querySelector('svg'); if(el) synAttach(el);
-    synInfo((mode==='gates'?'Gates':'RTL')+(summary?'  ·  '+summary:'')+(latch?'   ⚠ latch inferred':''));
+    synInfo((mode==='gates'?'Gates':'RTL')+(summary?'  ·  '+summary:'')+(latch?'   ⚠ latch inferred — check for missing else/default':''));
   }catch(e){ synEmpty('Render error: '+escapeHtml(e&&e.message||String(e))); }
 }
 function setSynMode(m){ synMode=m; $('#synGates').classList.toggle('on',m==='gates'); $('#synRTL').classList.toggle('on',m==='rtl'); if(synActivated) synthesize(m); }
