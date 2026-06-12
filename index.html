@@ -122,7 +122,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.24</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.25</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -219,7 +219,7 @@ const setDesign=t=>{ if(dgED) dgED.setValue(t); else $('#design').value=t; };
 const isPristine=()=> (getTB().trim()===''||getTB()===BLANK_TB) && (getDesign().trim()===''||getDesign()===BLANK_DESIGN);
 function loadPair(d,t){                               // replace both editors, warn if real code would be lost
   if(getDesign()===d && getTB()===t) return true;     // identical -> nothing to lose
-  if(!isPristine() && !confirm('Editörde kod var — değiştirilirse kaybolur (gerekiyorsa önce "save" ile indir). Devam edilsin mi?')) return false;
+  if(!isPristine() && !confirm('The editor contains code — it will be lost if replaced (use "save" first if needed). Continue?')) return false;
   setDesign(d); setTB(t); return true;
 }
 function openInto(setter){                            // load a local .v file into one editor
@@ -238,7 +238,7 @@ $('#dgOpen').onclick=()=>openInto(setDesign);
 $('#dgSave').onclick=()=>saveText('design.v',getDesign());
 function clearPane(get,set,blank){                   // OK -> clear this pane only; Cancel -> nothing
   if(get().trim()===''||get()===blank){ set(blank); return; }   // already empty: just reset, no prompt
-  if(confirm('Bu pencere temizlenecek — içerik kaybolur. Devam edilsin mi?')) set(blank);
+  if(confirm('This pane will be cleared — its contents will be lost. Continue?')) set(blank);
 }
 $('#tbClear').onclick=()=>clearPane(getTB,setTB,BLANK_TB);
 $('#dgClear').onclick=()=>clearPane(getDesign,setDesign,BLANK_DESIGN);
