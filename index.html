@@ -122,7 +122,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.25</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.26</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -664,7 +664,7 @@ function renderWave(){
       } else {
         if(bad){
           add('rect',{x:x0+1,y:hi,width:Math.max(0,wv-2),height:lo-hi,fill:fillU,opacity:isX?.8:.45},G);
-          if(x1-x0>20) add('text',{x:(x0+x1)/2,y:y+ymid+4,fill:'#fff','font-size':11,'text-anchor':'middle'},G)
+          if(x1-x0>20) add('text',{x:(x0+x1)/2,y:y+ymid+4,fill:isX?'#fff':'#15191f','font-size':11,'text-anchor':'middle'},G)
             .textContent=isX?'x':'z';
         } else {
           add('line',{x1:x0+2,y1:hi,x2:x1-2,y2:hi,stroke:'var(--wave)','stroke-width':1.4},G);
