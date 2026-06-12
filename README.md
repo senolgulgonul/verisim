@@ -9,7 +9,7 @@ A browser-based Verilog simulator built by compiling [Icarus Verilog](https://gi
 
 ## Ported toolchain
 
-VeriSim runs **Icarus Verilog version 14.0 (devel)**, compiled from the project's `master` branch (the development line after the 13.0 release) to WebAssembly with [Emscripten](https://emscripten.org/).
+VeriSim runs **Icarus Verilog version 14.0 (devel)**, built from upstream commit [`c7530db`](https://github.com/steveicarus/iverilog/commit/c7530db) (`master` as of 2026-05-31, the development line after the 13.0 release), compiled to WebAssembly with [Emscripten](https://emscripten.org/).
 
 Icarus Verilog is three cooperating programs; each is shipped here as a separate WebAssembly module:
 
@@ -79,7 +79,7 @@ VeriSim bundles WebAssembly binaries built from **Icarus Verilog**, which is lic
 - Icarus Verilog © Stephen Williams and contributors — https://github.com/steveicarus/iverilog
 - Full license text: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
-The corresponding Icarus Verilog source (and the Emscripten build steps / patches used to produce the modules) is the `master` branch of the upstream repository at version 14.0 (devel).
+The corresponding Icarus Verilog source (and the Emscripten build steps / patches used to produce the modules) is the `master` branch of the upstream repository at version 14.0 (devel), commit `c7530db` (2026-05-31).
 
 The **Synthesize** feature relies on three additional open-source projects, loaded as-is (not modified):
 
