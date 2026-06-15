@@ -122,7 +122,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.26</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.27</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -577,7 +577,7 @@ function parseVCD(text){
     let id,val;
     if('bBrR'.includes(line[0])){ const sp=line.indexOf(' '); val=line.slice(1,sp); id=line.slice(sp+1).trim(); }
     else { val=line[0]; id=line.slice(1).trim(); }
-    if(vars[id]) vars[id].vals.push([t,val]);
+    if(vars[id]){ const a=vars[id].vals; if(!a.length || a[a.length-1][1]!==val) a.push([t,val]); } // dedup: drop no-op writes so redundant same-value records don't draw spurious edges
   }
   const tm=text.match(/\$timescale\s+(\d+)\s*(s|ms|us|ns|ps|fs)/);
   const exp={s:0,ms:-3,us:-6,ns:-9,ps:-12,fs:-15};
