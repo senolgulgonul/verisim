@@ -48,6 +48,35 @@
   #run:hover{filter:brightness(1.06)} #run:active{transform:translateY(1px)} #run:disabled{opacity:.5;cursor:default}
   #run .tri{font-size:11px}
 
+  #urlBtn{background:#fff;color:var(--ink-dim);border:1px solid var(--edge);border-radius:6px;padding:7px 12px;cursor:pointer}
+  #urlBtn:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* ---- load-from-URL modal ---- */
+  .modal-bg{position:fixed;inset:0;background:rgba(18,26,40,.45);display:none;align-items:center;justify-content:center;z-index:50}
+  .modal-bg.on{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--edge);border-radius:10px;width:min(580px,92vw);
+    box-shadow:0 14px 44px rgba(10,20,40,.28);padding:18px 20px;font-family:var(--sans)}
+  .modal h3{margin:0 0 4px;font-family:var(--mono);font-size:15px;color:var(--ink)}
+  .modal p{margin:0;font-size:12.5px;color:var(--ink-dim);line-height:1.5}
+  .modal label{display:block;font-family:var(--mono);font-size:12px;color:var(--ink-dim);margin:13px 0 4px}
+  .modal input[type=text]{width:100%;font-family:var(--mono);font-size:12.5px;padding:8px 10px;
+    border:1px solid var(--edge);border-radius:6px;background:#fff;color:var(--ink)}
+  .modal input[type=text]:focus{outline:none;border-color:var(--accent)}
+  .modal .hint{margin-top:13px;font-size:11.5px;color:var(--ink-faint);line-height:1.6}
+  .modal .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .modal .chip{font-family:var(--mono);font-size:11px;background:#f3f5f8;border:1px solid var(--edge);
+    border-radius:5px;color:var(--ink-dim);padding:3px 9px;cursor:pointer}
+  .modal .chip:hover{border-color:var(--accent);color:var(--accent)}
+  .modal .err{min-height:16px;margin-top:12px;font-family:var(--mono);font-size:11.5px;color:var(--bad)}
+  .modal .row{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:6px}
+  .modal .row .grp{display:flex;gap:8px}
+  .modal .row button{font-family:var(--mono);font-size:13px;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:600}
+  .modal .copied{font-family:var(--mono);font-size:11px;color:var(--accent)}
+  .modal .ghost{background:#fff;color:var(--ink-dim);border:1px solid var(--edge)}
+  .modal .ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .modal .primary{background:var(--accent);color:#fff;border:none}
+  .modal .primary:hover{filter:brightness(1.06)} .modal .primary:disabled{opacity:.55;cursor:default}
+
   main{flex:1;display:flex;min-height:0}
   #vsplit{flex:none;height:7px;background:var(--edge);cursor:row-resize;position:relative}
   #vsplit::after{content:"";position:absolute;left:50%;top:2px;width:38px;height:3px;margin-left:-19px;border-radius:2px;background:#b8bfc9}
@@ -122,7 +151,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.27</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.29</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -132,6 +161,7 @@
     <option value="shiftreg">Shift Register &mdash; 4-bit (sequential)</option>
     <option value="counter2">Counter &mdash; 2-bit (sequential)</option>
   </select>
+  <button id="urlBtn" title="Load design.v and testbench.v from URLs">URL&hellip;</button>
   <select id="gen" title="Language generation">
     <option value="2005" selected>Verilog-2005</option>
     <option value="2009">Verilog/SV-2009</option>
@@ -755,20 +785,27 @@ async function fetchVerilog(u){                          // fetch one .v file as
   if(!res.ok) throw new Error('HTTP '+res.status+' for '+url);
   return sanitize(await res.text());
 }
+async function loadFromUrls(dURL,tURL){                  // fetch+place both panes; either one optional; throws on failure
+  dURL=String(dURL||'').trim(); tURL=String(tURL||'').trim();
+  if(!dURL && !tURL) return false;
+  const [d,t]=await Promise.all([                        // load both in parallel
+    dURL?fetchVerilog(dURL):Promise.resolve(null),
+    tURL?fetchVerilog(tURL):Promise.resolve(null)
+  ]);
+  if(d!=null) setDesign(d);
+  if(t!=null) setTB(t);
+  if(tbED) tbED.refresh(); if(dgED) dgED.refresh();
+  log('loaded from URL'+(dURL?'  design='+dURL:'')+(tURL?'  testbench='+tURL:''),'sys');
+  return true;
+}
+
+/* auto-load on open: ?design=<url>&testbench=<url> */
 (async function(){
   const q=new URLSearchParams(location.search);
   const dURL=q.get('design'), tURL=q.get('testbench');
   if(!dURL && !tURL) return;                             // no params -> leave the blank editors alone
-  try{
-    const [d,t]=await Promise.all([                      // load both in parallel; either one is optional
-      dURL?fetchVerilog(dURL):Promise.resolve(null),
-      tURL?fetchVerilog(tURL):Promise.resolve(null)
-    ]);
-    if(d!=null) setDesign(d);
-    if(t!=null) setTB(t);
-    if(tbED) tbED.refresh(); if(dgED) dgED.refresh();
-    log('loaded from URL'+(dURL?'  design='+dURL:'')+(tURL?'  testbench='+tURL:''),'sys');
-  }catch(err){
+  try{ await loadFromUrls(dURL,tURL); }
+  catch(err){
     const msg=(err&&err.message)?err.message:String(err);
     log('URL load failed: '+msg,'err');
     alert('Could not load files from the URL parameters.\n\n'+msg+
@@ -776,6 +813,95 @@ async function fetchVerilog(u){                          // fetch one .v file as
       'A normal github.com/.../blob/... page link is converted automatically. '+
       'The host must allow cross-origin (CORS) requests.');
   }
+})();
+
+/* ---------- manual load: URL button + two-field dialog (modal built in JS so it can't half-load) ---------- */
+(function(){
+  // Sample pairs are just prefilled examples — any github.com or raw link works in the fields.
+  const SAMPLES=[
+    ['full adder',    'https://github.com/senolgulgonul/verilog/blob/main/fulladder.v',          'https://github.com/senolgulgonul/verilog/blob/main/fulladder_tb.v'],
+    ['half adder',    'https://github.com/senolgulgonul/verilog/blob/main/halfadder.v',          'https://github.com/senolgulgonul/verilog/blob/main/halfadder_tb.v'],
+    ['2-to-4 decoder','https://github.com/senolgulgonul/verilog/blob/main/two_to_four_decoder.v','https://github.com/senolgulgonul/verilog/blob/main/two_to_four_decoder_tb.v'],
+    ['two gates',     'https://github.com/senolgulgonul/verilog/blob/main/twogates.v',           'https://github.com/senolgulgonul/verilog/blob/main/twogates_tb.v']
+  ];
+
+  // build the dialog once and attach to <body>
+  const bg=document.createElement('div');
+  bg.className='modal-bg'; bg.id='urlModal';
+  bg.innerHTML=
+    '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="urlTitle">'
+    +'<h3 id="urlTitle">Load from URL</h3>'
+    +'<p>Paste any GitHub file link &mdash; a normal <code>github.com/&hellip;/blob/&hellip;</code> page link or a '
+    +'<code>raw.githubusercontent.com/&hellip;</code> link (a same-site path works too). Either field may be left blank.</p>'
+    +'<label for="urlDesign">design.v URL</label>'
+    +'<input type="text" id="urlDesign" spellcheck="false" placeholder="https://github.com/USER/REPO/blob/BRANCH/design.v">'
+    +'<label for="urlTb">testbench.v URL</label>'
+    +'<input type="text" id="urlTb" spellcheck="false" placeholder="https://github.com/USER/REPO/blob/BRANCH/testbench.v">'
+    +'<div class="hint">Sample pairs (click to fill, then Load):<div class="chips" id="urlChips"></div></div>'
+    +'<div class="err" id="urlErr"></div>'
+    +'<div class="row">'
+      +'<button class="ghost" id="urlShare" title="Copy a shareable ?design=&amp;testbench= link">Copy share link</button>'
+      +'<span class="copied" id="urlCopied"></span>'
+      +'<span class="grp"><button class="ghost" id="urlCancel">Cancel</button><button class="primary" id="urlLoad">Load</button></span>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(bg);
+
+  const q=sel=>bg.querySelector(sel);
+  const dIn=q('#urlDesign'), tIn=q('#urlTb'), errEl=q('#urlErr'),
+        loadBtn=q('#urlLoad'), copied=q('#urlCopied');
+  const setErr=m=>{ errEl.textContent=m||''; };
+  const open =()=>{ setErr(''); copied.textContent=''; bg.classList.add('on'); setTimeout(()=>dIn.focus(),0); };
+  const close=()=>bg.classList.remove('on');
+
+  // sample chips
+  const chips=q('#urlChips');
+  SAMPLES.forEach(([label,d,t])=>{
+    const b=document.createElement('button');
+    b.className='chip'; b.textContent=label;
+    b.onclick=()=>{ dIn.value=d; tIn.value=t; setErr(''); copied.textContent=''; };
+    chips.appendChild(b);
+  });
+
+  // header button: wire it if present, otherwise create one in the header so the feature always works
+  let trigger=document.querySelector('#urlBtn');
+  if(!trigger){
+    trigger=document.createElement('button');
+    trigger.id='urlBtn'; trigger.textContent='URL…';
+    trigger.title='Load design.v and testbench.v from URLs';
+    const gen=document.querySelector('#gen'), run=document.querySelector('#run');
+    if(gen&&gen.parentNode) gen.parentNode.insertBefore(trigger,gen);
+    else if(run&&run.parentNode) run.parentNode.insertBefore(trigger,run);
+    else (document.querySelector('header')||document.body).appendChild(trigger);
+  }
+  trigger.onclick=open;
+
+  q('#urlCancel').onclick=close;
+  bg.addEventListener('mousedown',e=>{ if(e.target===bg) close(); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape' && bg.classList.contains('on')) close(); });
+
+  async function doLoad(){
+    if(!dIn.value.trim() && !tIn.value.trim()){ setErr('Enter at least one URL.'); return; }
+    if(!isPristine() && !confirm('The editors contain code — loading will replace it. Continue?')) return;
+    setErr(''); loadBtn.disabled=true; loadBtn.textContent='Loading…';
+    try{ await loadFromUrls(dIn.value,tIn.value); close(); }
+    catch(err){ setErr((err&&err.message)?err.message:String(err)); }
+    finally{ loadBtn.disabled=false; loadBtn.textContent='Load'; }
+  }
+  loadBtn.onclick=doLoad;
+  [dIn,tIn].forEach(el=>el.addEventListener('keydown',e=>{ if(e.key==='Enter') doLoad(); }));
+
+  // copy a shareable link built from the two fields
+  q('#urlShare').onclick=async()=>{
+    const d=dIn.value.trim(), t=tIn.value.trim();
+    if(!d && !t){ setErr('Enter at least one URL to build a share link.'); return; }
+    const p=new URLSearchParams();
+    if(d) p.set('design',d); if(t) p.set('testbench',t);
+    const link=location.origin+location.pathname+'?'+p.toString();
+    try{ await navigator.clipboard.writeText(link); copied.textContent='copied'; }
+    catch(_){ copied.textContent=''; prompt('Copy this share link:',link); }
+    setTimeout(()=>{ copied.textContent=''; },1800);
+  };
 })();
 
 status('engine ready &mdash; press Run');
