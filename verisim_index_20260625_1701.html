@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<!--
+  Verisim — browser-based Verilog simulator (Icarus Verilog -> WASM)
+  Files required next to this index.html:  ivlpp.js/.wasm  ivl.js/.wasm  vvp.js/.wasm
+  Serve over HTTP:  python3 -m http.server 8090   ->   http://localhost:8090/
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="VeriSim — Verilog simulator and synthesizer in your browser. Icarus Verilog and Yosys compiled to WebAssembly: edit, simulate, view waveforms, and see gate-level or RTL schematics. No install, no server.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231b6ef3'/%3E%3Cpath d='M8 7l8 18L24 7h-4.4L16 17.4 12.4 7z' fill='%23fff'/%3E%3C/svg%3E">
+<title>VeriSim — Verilog in your browser</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/verilog/verilog.min.js"></script>
+<!-- schematic renderer: self-hosted bundles (download from https://nturley.github.io/netlistsvg/ — elk MUST load before netlistsvg) -->
+<script src="elk.bundled.js"></script>
+<script src="netlistsvg.bundle.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#eef0f3; --panel:#ffffff; --edge:#d4d9e0;
+    --ink:#15191f; --ink-dim:#677083; --ink-faint:#aab2bd;
+    --accent:#1d6fe0; --wave:#15191f; --bad:#d23730; --warn:#b26a00;
+    --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'IBM Plex Sans',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);display:flex;flex-direction:column;overflow:hidden}
+
+  header{display:flex;align-items:center;gap:18px;padding:9px 18px;border-bottom:1px solid var(--edge);background:#fafbfc}
+  .brand{display:flex;align-items:baseline;gap:10px}
+  .brand b{font-family:var(--mono);font-weight:600;font-size:19px;letter-spacing:.5px;color:#11151b}
+  .brand b span{color:var(--accent)}
+  .brand small{color:var(--ink-dim);font-size:12px}
+  .brand .ver{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--accent);border:1px solid var(--edge);border-radius:5px;padding:1px 6px}
+  header .spacer{flex:1}
+  select,button{font-family:var(--mono);font-size:13px}
+  select{background:#fff;color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px 8px}
+  #run{display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:#fff;font-weight:600;
+    border:none;border-radius:6px;padding:8px 18px;cursor:pointer;box-shadow:0 1px 2px rgba(20,40,80,.2);transition:transform .06s,filter .15s}
+  #run:hover{filter:brightness(1.06)} #run:active{transform:translateY(1px)} #run:disabled{opacity:.5;cursor:default}
+  #run .tri{font-size:11px}
+
+  #urlBtn{background:#fff;color:var(--ink-dim);border:1px solid var(--edge);border-radius:6px;padding:7px 12px;cursor:pointer}
+  #urlBtn:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* ---- load-from-URL modal ---- */
+  .modal-bg{position:fixed;inset:0;background:rgba(18,26,40,.45);display:none;align-items:center;justify-content:center;z-index:50}
+  .modal-bg.on{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--edge);border-radius:10px;width:min(580px,92vw);
+    box-shadow:0 14px 44px rgba(10,20,40,.28);padding:18px 20px;font-family:var(--sans)}
+  .modal h3{margin:0 0 4px;font-family:var(--mono);font-size:15px;color:var(--ink)}
+  .modal p{margin:0;font-size:12.5px;color:var(--ink-dim);line-height:1.5}
+  .modal label{display:block;font-family:var(--mono);font-size:12px;color:var(--ink-dim);margin:13px 0 4px}
+  .modal input[type=text]{width:100%;font-family:var(--mono);font-size:12.5px;padding:8px 10px;
+    border:1px solid var(--edge);border-radius:6px;background:#fff;color:var(--ink)}
+  .modal input[type=text]:focus{outline:none;border-color:var(--accent)}
+  .modal .hint{margin-top:13px;font-size:11.5px;color:var(--ink-faint);line-height:1.6}
+  .modal .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .modal .chip{font-family:var(--mono);font-size:11px;background:#f3f5f8;border:1px solid var(--edge);
+    border-radius:5px;color:var(--ink-dim);padding:3px 9px;cursor:pointer}
+  .modal .chip:hover{border-color:var(--accent);color:var(--accent)}
+  .modal .err{min-height:16px;margin-top:12px;font-family:var(--mono);font-size:11.5px;color:var(--bad)}
+  .modal .row{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:6px}
+  .modal .row .grp{display:flex;gap:8px}
+  .modal .row button{font-family:var(--mono);font-size:13px;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:600}
+  .modal .copied{font-family:var(--mono);font-size:11px;color:var(--accent)}
+  .modal .ghost{background:#fff;color:var(--ink-dim);border:1px solid var(--edge)}
+  .modal .ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .modal .primary{background:var(--accent);color:#fff;border:none}
+  .modal .primary:hover{filter:brightness(1.06)} .modal .primary:disabled{opacity:.55;cursor:default}
+
+  main{flex:1;display:flex;min-height:0}
+  #vsplit{flex:none;height:7px;background:var(--edge);cursor:row-resize;position:relative}
+  #vsplit::after{content:"";position:absolute;left:50%;top:2px;width:38px;height:3px;margin-left:-19px;border-radius:2px;background:#b8bfc9}
+  #vsplit:hover{background:var(--accent)} #vsplit:hover::after{background:#fff}
+  .pane{flex:1;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--edge)}
+  .pane:last-child{border-right:none}
+  .pane h2{margin:0;padding:6px 12px;font-family:var(--mono);font-weight:500;font-size:12.5px;letter-spacing:.3px;
+    text-transform:none;color:var(--ink-dim);border-bottom:1px solid var(--edge);background:#f3f5f8;display:flex;align-items:center;gap:8px}
+  .pane h2 .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .pane h2 .grow{flex:1}
+  .pane h2 .lnk{background:#fff;border:1px solid var(--edge);border-radius:5px;color:var(--ink-dim);
+    font-family:var(--mono);font-size:11px;padding:2px 9px;cursor:pointer}
+  .pane h2 .lnk:hover{border-color:var(--accent);color:var(--accent)}
+  .pane .editor{flex:1;min-height:0;position:relative}
+  textarea{width:100%;height:100%;border:none;resize:none;outline:none;background:#fff;color:var(--ink);
+    padding:12px 14px;font-family:var(--mono);font-size:13.5px;line-height:1.55;tab-size:2}
+  .CodeMirror{height:100%!important;background:#fff;color:var(--ink);font-family:var(--mono);font-size:13.5px;line-height:1.55}
+  .CodeMirror-gutters{background:#f7f8fa;border-right:1px solid var(--edge)}
+  .CodeMirror-linenumber{color:var(--ink-faint)}
+  .cm-s-default .cm-keyword{color:#0a52c4;font-weight:600}
+  .cm-s-default .cm-number{color:#b26a00}
+  .cm-s-default .cm-comment{color:#8a95a3;font-style:italic}
+  .cm-s-default .cm-string{color:#137a3e}
+  .cm-s-default .cm-meta{color:#8a3fb0}
+  .cm-s-default .cm-variable-2,.cm-s-default .cm-def{color:#15191f}
+
+  #bottom{height:43%;display:flex;flex-direction:column;border-top:1px solid var(--edge);background:#fff}
+  .tabs{display:flex;align-items:center;gap:2px;padding:0 8px;border-bottom:1px solid var(--edge);background:#f7f8fa}
+  .tab{font-family:var(--mono);font-size:12px;color:var(--ink-dim);padding:9px 14px;cursor:pointer;border-bottom:2px solid transparent;user-select:none}
+  .tab.active{color:var(--ink);border-bottom-color:var(--accent)}
+  .tabs .spacer{flex:1}
+  .tabs .stat{font-family:var(--mono);font-size:12px;color:var(--ink-dim);padding-right:6px}
+  .tabs .stat b{color:#137a3e;font-weight:600}
+  .tabs a.act{font-family:var(--mono);font-size:12px;color:var(--accent);text-decoration:none;padding:0 10px;cursor:pointer}
+  .tabs a.act:hover{text-decoration:underline}
+  .view{flex:1;min-height:0;overflow:auto;display:none}
+  .view.active{display:block}
+  #console{font-family:var(--mono);font-size:13px;line-height:1.5;padding:10px 14px;white-space:pre-wrap;margin:0;color:var(--ink)}
+  #console .l-err{color:var(--bad)} #console .l-warn{color:var(--warn)} #console .l-sys{color:var(--ink-dim)}
+
+  /* waveform view: signal list + zoomable plot */
+  #wave{padding:0;overflow:hidden}
+  #synth.active{display:flex;flex-direction:column;overflow:hidden}
+  #stools{display:flex;align-items:center;gap:12px;padding:7px 12px;border-bottom:1px solid var(--edge);background:#f3f5f8;flex:none}
+  #stools .seg{display:inline-flex;border:1px solid var(--edge);border-radius:6px;overflow:hidden}
+  #stools .seg button{border:none;background:#fff;color:var(--ink-dim);font-family:var(--mono);font-size:11px;padding:4px 12px;cursor:pointer}
+  #stools .seg button.on{background:var(--accent);color:#fff}
+  #stools #synRun{border:1px solid var(--edge);background:#fff;color:var(--ink-dim);font-family:var(--mono);font-size:11px;border-radius:6px;padding:4px 12px;cursor:pointer}
+  #stools #synRun:hover{border-color:var(--accent);color:var(--accent)}
+  #synarea{flex:1;min-height:0;overflow:hidden;padding:0;background:#fff;position:relative;cursor:grab}
+  #synarea svg{display:block;user-select:none}
+  #synarea .empty{padding:12px}
+  #wave.active{display:flex}
+  #siglist{width:204px;flex:none;overflow:auto;border-right:1px solid var(--edge);background:#fafbfc;display:none;font-family:var(--mono);font-size:12px}
+  #siglist .sl-head{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;color:var(--ink-dim);
+    border-bottom:1px solid var(--edge);position:sticky;top:0;background:#fafbfc;letter-spacing:.5px}
+  #siglist .sl-head a{color:var(--accent);cursor:pointer} #siglist .sl-head a:hover{text-decoration:underline}
+  #siglist label{display:flex;gap:7px;align-items:center;padding:3px 10px;cursor:pointer;white-space:nowrap;color:var(--ink)}
+  #siglist label:hover{background:#f0f2f5}
+  #wavecol{flex:1;display:flex;flex-direction:column;min-width:0}
+  #wtools{display:flex;align-items:center;gap:14px;padding:5px 10px;border-bottom:1px solid var(--edge);background:#f7f8fa}
+  #wtools button{background:#fff;border:1px solid var(--edge);border-radius:5px;padding:4px 12px;cursor:pointer;color:var(--ink)}
+  #wtools button:hover{border-color:var(--accent);color:var(--accent)}
+  #wtools .hint{color:var(--ink-dim);font-family:var(--mono);font-size:11px}
+  #wtools #wmarker{color:#15191f;font-family:var(--mono);font-size:12px;font-weight:600}
+  #wavearea{flex:1;overflow:auto;position:relative}
+  #wavearea .empty{color:var(--ink-dim);font-family:var(--mono);font-size:13px;padding:16px}
+  #wavearea svg{display:block;user-select:none}
+  #wavearea svg text{font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.30</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="spacer"></div>
+  <select id="examples" title="Load an example or start blank">
+    <option value="" selected>Examples&hellip;</option>
+    <option value="gate">Gate-Level &mdash; Half Adder</option>
+    <option value="dataflow">Dataflow &mdash; Half Adder</option>
+    <option value="behavioral">Behavioral &mdash; Half Adder</option>
+    <option value="shiftreg">Shift Register &mdash; 4-bit (sequential)</option>
+    <option value="counter2">Counter &mdash; 2-bit (sequential)</option>
+  </select>
+  <button id="urlBtn" title="Load design.v and testbench.v from URLs">URL&hellip;</button>
+  <select id="gen" title="Language generation">
+    <option value="2005" selected>Verilog-2005</option>
+    <option value="2009">Verilog/SV-2009</option>
+    <option value="2012">SystemVerilog-2012</option>
+  </select>
+  <button id="run"><span class="tri">&#9658;</span> Run</button>
+</header>
+
+<main>
+  <section class="pane"><h2><span class="dot"></span> testbench.v<span class="grow"></span>
+      <button class="lnk" id="tbClear">clear</button><button class="lnk" id="tbOpen">open</button><button class="lnk" id="tbSave">save</button></h2>
+    <div class="editor"><textarea id="tb" spellcheck="false"></textarea></div></section>
+  <section class="pane"><h2><span class="dot"></span> design.v<span class="grow"></span>
+      <button class="lnk" id="dgClear">clear</button><button class="lnk" id="dgOpen">open</button><button class="lnk" id="dgSave">save</button></h2>
+    <div class="editor"><textarea id="design" spellcheck="false"></textarea></div></section>
+</main>
+
+<div id="vsplit" title="Drag to resize"></div>
+<div id="bottom">
+  <div class="tabs">
+    <div class="tab active" data-v="console">Console</div>
+    <div class="tab" data-v="wave">Waveform</div>
+    <div class="tab" data-v="synth">Synthesize</div>
+    <div class="spacer"></div>
+    <a class="act" id="dlvcd" style="display:none">&darr; dump.vcd</a>
+    <div class="stat" id="stat">engine idle</div>
+  </div>
+  <pre id="console" class="view active"></pre>
+  <div id="wave" class="view">
+    <aside id="siglist"></aside>
+    <div id="wavecol">
+      <div id="wtools">
+        <button id="wfit">Fit</button>
+        <span class="hint">scroll = zoom &middot; drag = pan &middot; click = cursor</span>
+        <span id="wmarker"></span>
+        <span class="hint" id="wrange"></span>
+      </div>
+      <div id="wavearea"><div class="empty">Run a simulation to see waveforms.</div></div>
+    </div>
+  </div>
+  <div id="synth" class="view">
+    <div id="stools">
+      <span class="seg"><button id="synGates" class="on">Gates</button><button id="synRTL">RTL</button></span>
+      <button id="synRun">Synthesize</button>
+      <span class="hint">scroll = zoom &middot; drag = pan &middot; dbl-click = fit</span>
+      <span class="hint" id="synstat"></span>
+    </div>
+    <div id="synarea"><div class="empty">Press <b>Synthesize</b> to see the synthesized circuit of design.v (gate-level or RTL).</div></div>
+  </div>
+</div>
+
+<script type="module">
+import initIvlpp from './ivlpp.js';
+import initIvl   from './ivl.js';
+import initVvp   from './vvp.js';
+const $ = s => document.querySelector(s);
+const escapeHtml = s => s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function sanitize(s){                                 // fix invisible/smart chars from slides (NBSP, smart quotes, zero-width)
+  return s.replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g,' ')
+          .replace(/[\u200B-\u200D\uFEFF]/g,'')
+          .replace(/[\u2018\u2019\u201A\u201B\u2032]/g,"'")
+          .replace(/[\u201C\u201D\u201E\u201F\u2033]/g,'"');
+}
+
+/* ---------- editors ---------- */
+let tbED,dgED;
+const BLANK_DESIGN=`// design.v — write your module here, or load one from Examples
+
+`;
+const BLANK_TB=`// testbench.v — write your testbench here, or load one from Examples
+
+`;
+(function(){
+  $('#tb').value=BLANK_TB; $('#design').value=BLANK_DESIGN;
+  if(window.CodeMirror){
+    const o={lineNumbers:true,mode:'verilog',tabSize:2,indentUnit:2};
+    tbED=CodeMirror.fromTextArea($('#tb'),o); dgED=CodeMirror.fromTextArea($('#design'),o);
+  }
+})();
+const getTB=()=>tbED?tbED.getValue():$('#tb').value;
+const getDesign=()=>dgED?dgED.getValue():$('#design').value;
+const setTB=t=>{ if(tbED) tbED.setValue(t); else $('#tb').value=t; };
+const setDesign=t=>{ if(dgED) dgED.setValue(t); else $('#design').value=t; };
+
+const isPristine=()=> (getTB().trim()===''||getTB()===BLANK_TB) && (getDesign().trim()===''||getDesign()===BLANK_DESIGN);
+function loadPair(d,t){                               // replace both editors, warn if real code would be lost
+  if(getDesign()===d && getTB()===t) return true;     // identical -> nothing to lose
+  if(!isPristine() && !confirm('The editor contains code — it will be lost if replaced (use "save" first if needed). Continue?')) return false;
+  setDesign(d); setTB(t); return true;
+}
+function openInto(setter){                            // load a local .v file into one editor
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='.v,.sv,.vh,.svh,.txt';
+  inp.onchange=()=>{ const f=inp.files[0]; if(!f) return;
+    const r=new FileReader(); r.onload=()=>setter(String(r.result)); r.readAsText(f); };
+  inp.click();
+}
+function saveText(name,text){                        // download editor contents as a file
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));
+  a.download=name; a.click(); URL.revokeObjectURL(a.href);
+}
+$('#tbOpen').onclick=()=>openInto(setTB);
+$('#tbSave').onclick=()=>saveText('testbench.v',getTB());
+$('#dgOpen').onclick=()=>openInto(setDesign);
+$('#dgSave').onclick=()=>saveText('design.v',getDesign());
+function clearPane(get,set,blank){                   // OK -> clear this pane only; Cancel -> nothing
+  if(get().trim()===''||get()===blank){ set(blank); return; }   // already empty: just reset, no prompt
+  if(confirm('This pane will be cleared — its contents will be lost. Continue?')) set(blank);
+}
+$('#tbClear').onclick=()=>clearPane(getTB,setTB,BLANK_TB);
+$('#dgClear').onclick=()=>clearPane(getDesign,setDesign,BLANK_DESIGN);
+
+/* ---------- example library: one circuit (half adder), three modeling styles ---------- */
+const HA_TB = title => `\`timescale 1ns/1ps
+module tb;
+  reg  a, b;
+  wire sum, carry;
+
+  half_adder dut(.a(a), .b(b), .s(sum), .c(carry));
+
+  initial begin
+    $dumpfile("dump.vcd");
+    $dumpvars(0, tb);
+    $display("=== Half Adder — ${title} ===");
+    $monitor("t=%0d ns  a=%b b=%b -> sum=%b carry=%b", $time, a, b, sum, carry);
+    a=0; b=0;
+    #10 a=0; b=1;
+    #10 a=1; b=0;
+    #10 a=1; b=1;
+    #10 $finish;
+  end
+endmodule
+`;
+const EXAMPLES = {
+  gate: { tb: HA_TB('Gate-Level'), design:
+`\`timescale 1ns/1ps
+// Gate-Level Modeling: structural netlist of gate primitives
+module half_adder(input a, input b, output s, output c);
+  xor (s, a, b);   // sum   = a ^ b
+  and (c, a, b);   // carry = a & b
+endmodule
+` },
+  dataflow: { tb: HA_TB('Dataflow'), design:
+`\`timescale 1ns/1ps
+// Dataflow Modeling: continuous assignment with logic operators
+module half_adder(input a, input b, output s, output c);
+  assign s = a ^ b;   // sum
+  assign c = a & b;   // carry
+endmodule
+` },
+  behavioral: { tb: HA_TB('Behavioral'), design:
+`\`timescale 1ns/1ps
+// Behavioral Modeling: procedural always block (combinational)
+module half_adder(input a, input b, output reg s, output reg c);
+  always @(*) begin
+    s = a ^ b;        // blocking assignments for combinational logic
+    c = a & b;
+  end
+endmodule
+` },
+  shiftreg: {
+    design:
+`\`timescale 1ns/1ps
+// 4-bit shift register (serial in, parallel out) — pure DFF chain
+module shiftreg(input wire clk, input wire rst, input wire din,
+                output reg q0, output reg q1, output reg q2, output reg q3);
+  always @(posedge clk or posedge rst)
+    if (rst) begin q0<=0; q1<=0; q2<=0; q3<=0; end
+    else     begin q0<=din; q1<=q0; q2<=q1; q3<=q2; end   // shift one stage per clock
+endmodule
+`,
+    tb:
+`\`timescale 1ns/1ps
+module tb;
+  reg clk = 0, rst = 1, din = 0;
+  wire q0, q1, q2, q3;
+
+  shiftreg dut(.clk(clk), .rst(rst), .din(din), .q0(q0), .q1(q1), .q2(q2), .q3(q3));
+
+  always #5 clk = ~clk;          // 10 ns clock
+
+  initial begin
+    $dumpfile("dump.vcd");
+    $dumpvars(0, tb);
+    $display(" t    din  q3q2q1q0");
+    $monitor("%3d    %b    %b%b%b%b", $time, din, q3, q2, q1, q0);
+    #12 rst = 0;
+    din=1; #10 din=0; #10 din=1; #10 din=1; #10 din=0;   // push pattern 1,0,1,1
+    #60 $finish;
+  end
+endmodule
+`
+  },
+  counter2: {
+    design:
+`\`timescale 1ns/1ps
+// 2-bit synchronous counter with asynchronous reset
+module counter2(input wire clk, input wire rst, output reg q0, output reg q1);
+  always @(posedge clk or posedge rst)
+    if (rst) {q1,q0} <= 2'b0;
+    else     {q1,q0} <= {q1,q0} + 2'b1;
+endmodule
+`,
+    tb:
+`\`timescale 1ns/1ps
+module tb;
+  reg clk = 0, rst = 1;
+  wire q0, q1;
+
+  counter2 dut(.clk(clk), .rst(rst), .q0(q0), .q1(q1));
+
+  always #5 clk = ~clk;          // 10 ns clock
+
+  initial begin
+    $dumpfile("dump.vcd");
+    $dumpvars(0, tb);
+    $display(" t    q1q0");
+    $monitor("%3d    %b%b", $time, q1, q0);
+    #12 rst = 0;
+    #80 $finish;
+  end
+endmodule
+` }
+};
+$('#examples').onchange=e=>{
+  const v=e.target.value; e.target.value='';          // reset back to the placeholder
+  if(EXAMPLES[v]) loadPair(EXAMPLES[v].design, EXAMPLES[v].tb);
+};
+
+/* ---------- console / status ---------- */
+const con=$('#console');
+const clearCon=()=>con.textContent='';
+function log(t,cls){ cls=cls||'out'; if(!t) return;
+  const s=document.createElement('span'); s.className='l-'+cls;
+  s.textContent=t.replace(/\s+$/,'')+'\n'; con.appendChild(s); con.scrollTop=con.scrollHeight; }
+const status=(t,ok)=>{ $('#stat').innerHTML = ok?'<b>'+t+'</b>':t; };
+
+/* ---------- engine ---------- */
+const ivlConf=g=>`basedir:/
+module:system.vpi
+generation:${g}
+generation:no-specify
+out:/out.vvp
+iwidth:32
+widthcap:65536
+functor:cprop
+functor:nodangle
+flag:DLL=vvp.tgt
+`;
+async function preprocessAll(files){       // ONE ivlpp pass over all sources -> shared macro table
+  const code=[];
+  const m=await initIvlpp({print:s=>code.push(s),printErr:()=>{}});
+  const args=['-L'];                       // -L: emit `line directives so ivl errors map to the right file
+  for(const f of files){                   // positional sources feed ivlpp's source_list (command order)
+    m.FS.writeFile('/'+f.name, f.src.endsWith('\n')?f.src:f.src+'\n');
+    args.push('/'+f.name);
+  }
+  m.callMain(args);
+  return code.join('\n')+'\n';
+}
+async function compile(srcText,g){
+  const err=[];
+  const m=await initIvl({print:()=>{},printErr:s=>err.push(s)});
+  m.FS.writeFile('/ivl.conf', ivlConf(g));
+  m.FS.writeFile('/src.v', srcText);       // one combined, already-preprocessed source
+  m.callMain(['-C/ivl.conf','--','/src.v']);
+  let vvp=null; try{vvp=m.FS.readFile('/out.vvp');}catch(e){}
+  return {vvp, err:err.join('\n')};
+}
+async function simulate(bytes){
+  const out=[];
+  const m=await initVvp({print:s=>out.push(s),printErr:s=>out.push(s)});
+  m.FS.writeFile('/sim.vvp', bytes);
+  m.callMain(['/sim.vvp']);
+  let vcd=null; try{vcd=m.FS.readFile('/dump.vcd',{encoding:'utf8'});}catch(e){}
+  return {out:out.join('\n'), vcd};
+}
+
+let lastVCD=null;
+async function run(){
+  const b=$('#run'); b.disabled=true;
+  clearCon(); $('#dlvcd').style.display='none';
+  const prevNames = WD ? selOrder.map(id=>WD.vars[id]&&WD.vars[id].name).filter(Boolean) : [];
+  curT=null; view0=0; viewSpan=null;
+  const g=$('#gen').value;
+  try{
+    status('preprocessing&hellip;');
+    const d0=getDesign(), t0=getTB(), d=sanitize(d0), t=sanitize(t0);
+    if(d!==d0||t!==t0) log('Note: normalized non-standard characters from pasted text (non-breaking spaces / smart quotes).','sys');
+    const pp=await preprocessAll([{name:'design.v',src:d},{name:'tb.v',src:t}]);
+    status('compiling&hellip;');
+    const c=await compile(pp,g);
+    if(!c.vvp){ const e=c.err.split('\n').filter(l=>!/system\.vpi|dynamic linking not enabled/.test(l)).join('\n');
+      log(e||'Compilation failed.','err'); status('compile error'); show('console'); return; }
+    const warn=c.err.split('\n').filter(l=>!/system\.vpi|dynamic linking not enabled/.test(l)).join('\n');
+    if(warn.trim()) log(warn,'warn');
+    status('simulating&hellip;');
+    const s=await simulate(c.vvp);
+    log(s.out.trim()? s.out : '(no console output)', s.out.trim()?'out':'sys');
+    if(s.vcd){ lastVCD=s.vcd; WD=parseVCD(s.vcd);
+      const byName={}; for(const id of WD.order) byName[WD.vars[id].name]=id;
+      selOrder=prevNames.map(n=>byName[n]).filter(Boolean);   // [] on first run; keeps picks on re-run
+      buildSigList(); renderWave();
+      $('#dlvcd').style.display='inline'; }
+    else { WD=null; selOrder=[]; lastVCD=null; $('#siglist').style.display='none';
+      $('#wavearea').innerHTML='<div class="empty">No waveform — add $dumpfile("dump.vcd"); and $dumpvars(0, tb); to the testbench.</div>'; }
+    status('done',true);
+  }catch(e){ log('Engine error: '+(e&&e.message||e),'err'); status('error'); show('console'); }
+  finally{ b.disabled=false; }
+}
+
+/* ---------- tabs & links ---------- */
+function show(v){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.v===v));
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+  const id = v==='wave'?'wave':v==='synth'?'synth':'console';
+  $('#'+id).classList.add('active');
+  if(v==='wave' && WD) renderWave();   // fix: correct width once the tab is visible
+  if(v==='synth' && synActivated) synthesize(synMode);
+}
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>show(t.dataset.v));
+$('#run').onclick=run;
+$('#dlvcd').onclick=()=>{ if(!lastVCD)return; const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([lastVCD],{type:'text/plain'})); a.download='dump.vcd'; a.click(); URL.revokeObjectURL(a.href); };
+
+/* ============ synthesis (Yosys via YoWASP) + schematic (netlistsvg) ============ */
+let yosysRun=null, synMode='gates', synActivated=false, synBusy=false, synSrc='', synCache={gates:null,rtl:null};
+const SYN_SCRIPT={                                    // verified with native yosys 0.33
+  gates:'synth -auto-top -flatten; delete t:$scopeinfo; abc -g AND,OR; opt_clean; write_json out.json',  // AND/OR/NOT only (SOP — truth-table/K-map style)
+  rtl:  'prep -auto-top; write_json out.json'                                       // word-level blocks, hierarchy kept
+};
+const synInfo = t => { $('#synstat').textContent = t; };
+const synEmpty = h => { $('#synarea').innerHTML = '<div class="empty">'+h+'</div>'; };
+function synBytesToStr(x){ if(typeof x==='string') return x;
+  try{ return new TextDecoder().decode(x instanceof Uint8Array ? x : new Uint8Array(x)); }
+  catch(_){ try{ return new TextDecoder().decode(Uint8Array.from(Object.values(x))); }catch(__){ return String(x); } } }
+
+async function loadYosys(){
+  if(yosysRun) return yosysRun;
+  synInfo('Loading Yosys (YoWASP, ~8 MB)…');
+  const m = await import('https://cdn.jsdelivr.net/npm/@yowasp/yosys/gen/bundle.js');
+  yosysRun = m.runYosys; return yosysRun;
+}
+async function synthesize(mode){
+  synActivated=true;
+  if(synBusy) return;                                                        // reentrancy guard
+  const src = sanitize(getDesign());
+  if(src.replace(/\/\/[^\n]*/g,'').replace(/\/\*[\s\S]*?\*\//g,'').trim()===''){ synEmpty('design.v is empty — write a module first.'); return; }
+  const gen=$('#gen').value;
+  const key=gen+'\u0000'+src;                                                // generation affects parsing
+  if(key!==synSrc){ synCache={gates:null,rtl:null}; synSrc=key; }            // editor/gen changed → stale cache
+  if(synCache[mode]){ renderNetlist(synCache[mode], mode); return; }          // cache hit
+  synBusy=true; $('#synRun').disabled=true;
+  let logBuf='';
+  try{
+    const run = await loadYosys();
+    synInfo('Synthesizing ('+mode+')…');
+    const readCmd=(gen==='2005'?'read_verilog design.v; ':'read_verilog -sv design.v; ');  // match the sim's language setting
+    const out = await run(['-q','-p',readCmd+SYN_SCRIPT[mode]],
+      { 'design.v': new TextEncoder().encode(src) },
+      { stdout:x=>{ logBuf+=synBytesToStr(x); }, stderr:x=>{ logBuf+=synBytesToStr(x); } });
+    const raw = out && out['out.json'];
+    if(!raw) throw new Error('no netlist produced');
+    const netlist = JSON.parse(synBytesToStr(raw));
+    synCache[mode]=netlist;
+    renderNetlist(netlist, mode);
+  }catch(e){
+    const errLines = logBuf.split('\n').filter(l=>/error/i.test(l)).slice(0,8).join('\n').trim();
+    const msg = errLines || (e&&e.message) || String(e);   // prefer Yosys's own error lines
+    synEmpty('<b>Synthesis error</b><br><pre style="white-space:pre-wrap;margin:6px 0;font-size:11px">'+escapeHtml(msg)+'</pre>'
+      +'<span class="dim">Only design.v is synthesized (not the testbench). Non-synthesizable constructs (#delays, $display, initial) can\'t be synthesized.</span>');
+    synInfo('');
+  }
+  finally{ synBusy=false; $('#synRun').disabled=false; }
+}
+async function renderNetlist(netlist, mode){
+  if(typeof netlistsvg==='undefined' || typeof ELK==='undefined'){
+    synEmpty('Schematic renderer not loaded. Download <b>elk.bundled.js</b> and <b>netlistsvg.bundle.js</b> from nturley.github.io/netlistsvg and place them next to index.html.'); return;
+  }
+  const cells={}; let latch=false; const mods=netlist.modules||{};
+  for(const mn in mods){ const cs=mods[mn].cells||{};
+    for(const cn in cs){ const ty=cs[cn].type||''; if(/scopeinfo/i.test(ty)) continue;
+      if(/dlatch/i.test(ty)) latch=true;
+      const t=ty.replace(/^\$_?/,'').replace(/_$/,''); cells[t]=(cells[t]||0)+1; } }
+  const summary=Object.entries(cells).sort().map(([k,v])=>v+'×'+k).join('  ');
+  try{
+    const svg = await netlistsvg.render(netlistsvg.digitalSkin, netlist);
+    $('#synarea').innerHTML = svg;
+    const el=$('#synarea').querySelector('svg'); if(el) synAttach(el);
+    synInfo((mode==='gates'?'Gates':'RTL')+(summary?'  ·  '+summary:'')+(latch?'   ⚠ latch inferred — check for missing else/default':''));
+  }catch(e){ synEmpty('Render error: '+escapeHtml(e&&e.message||String(e))); }
+}
+function setSynMode(m){ synMode=m; $('#synGates').classList.toggle('on',m==='gates'); $('#synRTL').classList.toggle('on',m==='rtl'); if(synActivated) synthesize(m); }
+$('#synRun').onclick=()=>{ synSrc=''; synthesize(synMode); };               // force fresh synth
+$('#synGates').onclick=()=>setSynMode('gates');
+$('#synRTL').onclick=()=>setSynMode('rtl');
+
+/* pan + zoom on the schematic (CSS transform) */
+let synSVG=null, synZ=1, synPX=0, synPY=0, synDrag=false, synDX=0, synDY=0;
+function synApply(){ if(synSVG) synSVG.style.transform='translate('+synPX+'px,'+synPY+'px) scale('+synZ+')'; }
+function synFit(){
+  if(!synSVG) return; const area=$('#synarea');
+  const aw=area.clientWidth, ah=area.clientHeight;
+  const sw=parseFloat(synSVG.getAttribute('width'))||(synSVG.getBBox&&synSVG.getBBox().width)||aw;
+  const sh=parseFloat(synSVG.getAttribute('height'))||(synSVG.getBBox&&synSVG.getBBox().height)||ah;
+  synZ = Math.min((aw-24)/sw, (ah-24)/sh, 1) || 1;
+  synPX = Math.max(12,(aw - sw*synZ)/2); synPY = 12;
+  synApply();
+}
+function synAttach(svg){ synSVG=svg; svg.style.transformOrigin='0 0'; synFit(); }
+(function(){
+  const area=$('#synarea'); if(!area) return;
+  area.addEventListener('wheel', e=>{ if(!synSVG) return; e.preventDefault();
+    const r=area.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+    const f = e.deltaY<0 ? 1.1 : 1/1.1;
+    synPX = mx-(mx-synPX)*f; synPY = my-(my-synPY)*f; synZ *= f; synApply();
+  }, {passive:false});
+  area.addEventListener('mousedown', e=>{ if(!synSVG) return; synDrag=true; synDX=e.clientX-synPX; synDY=e.clientY-synPY; area.style.cursor='grabbing'; e.preventDefault(); });
+  window.addEventListener('mousemove', e=>{ if(!synDrag) return; synPX=e.clientX-synDX; synPY=e.clientY-synDY; synApply(); });
+  window.addEventListener('mouseup', ()=>{ if(synDrag){ synDrag=false; area.style.cursor='grab'; } });
+  area.addEventListener('dblclick', ()=>{ synFit(); });
+})();
+
+/* ============ VCD parse + signal list + zoomable waveform ============ */
+function parseVCD(text){
+  const vars={},order=[],scope=[]; let t=0,defs=true;
+  for(const raw of text.split('\n')){
+    const line=raw.trim(); if(!line) continue;
+    if(defs){
+      if(line.startsWith('$scope')){ scope.push(line.split(/\s+/)[2]); continue; }
+      if(line.startsWith('$upscope')){ scope.pop(); continue; }
+      if(line.startsWith('$var')){
+        const p=line.split(/\s+/), width=parseInt(p[2],10), id=p[3];
+        const nm=p[4], range=(p[5]&&p[5][0]==='[')?' '+p[5]:'';
+        const full=(scope.length?scope.join('.')+'.':'')+nm+range;
+        if(!vars[id]){ vars[id]={name:full,width,vals:[]}; order.push(id); }
+        continue;
+      }
+      if(line.startsWith('$enddefinitions')) defs=false;
+      continue;
+    }
+    if(line[0]==='#'){ t=parseInt(line.slice(1),10); continue; }
+    if(line[0]==='$') continue;
+    let id,val;
+    if('bBrR'.includes(line[0])){ const sp=line.indexOf(' '); val=line.slice(1,sp); id=line.slice(sp+1).trim(); }
+    else { val=line[0]; id=line.slice(1).trim(); }
+    if(vars[id]){ const a=vars[id].vals; if(!a.length || a[a.length-1][1]!==val) a.push([t,val]); } // dedup: drop no-op writes so redundant same-value records don't draw spurious edges
+  }
+  const tm=text.match(/\$timescale\s+(\d+)\s*(s|ms|us|ns|ps|fs)/);
+  const exp={s:0,ms:-3,us:-6,ns:-9,ps:-12,fs:-15};
+  const tsSec = tm ? parseInt(tm[1],10)*Math.pow(10,exp[tm[2]]) : null;
+  return {vars,order,tmax:t||1,tsSec};
+}
+function binToHex(b){ if(/[xz]/i.test(b)) return /x/i.test(b)?'x':'z';
+  let s=b; while(s.length%4) s='0'+s; let h='';
+  for(let i=0;i<s.length;i+=4) h+=parseInt(s.substr(i,4),2).toString(16);
+  return '0x'+h.replace(/^0+(?=.)/,''); }
+function valAt(v,t){ let cur='x'; for(const e of v.vals){ if(e[0]<=t) cur=e[1]; else break; } return cur; }
+function niceStep(span){ const raw=span/8, p=Math.pow(10,Math.floor(Math.log10(raw)||0)), f=raw/p;
+  const n=f<1.5?1:f<3?2:f<7?5:10; return Math.max(1,Math.round(n*p)); }   // >=1, integer-ish tick step
+function fmt(v,raw){ return v.width===1?raw:(/[xz]/i.test(raw)?raw:binToHex(raw)); }
+function fmtTime(raw){                                // GTKWave rule: coarsest unit where the value is an exact integer
+  raw=Math.round(raw); const tsSec=WD&&WD.tsSec;
+  if(!tsSec) return ''+raw;
+  if(raw===0) return '0';
+  const s=raw*tsSec, U=[['s',1],['ms',1e-3],['us',1e-6],['ns',1e-9],['ps',1e-12],['fs',1e-15]];
+  for(const [u,m] of U){ const v=s/m, r=Math.round(v);
+    if(r!==0 && Math.abs(v-r)<=1e-6*Math.abs(v)) return r+' '+u; }
+  return Math.round(s/1e-15)+' fs';
+}
+
+let WD=null, selOrder=[], view0=0, viewSpan=null, curT=null, _geom=null;
+const waveArea=$('#wavearea'), sigList=$('#siglist');
+
+function buildSigList(){
+  let h='<div class="sl-head"><span>SIGNALS</span><span><a id="slAll">all</a> &middot; <a id="slNone">none</a></span></div>';
+  for(let i=0;i<WD.order.length;i++){ const v=WD.vars[WD.order[i]];
+    h+=`<label><input type="checkbox" data-i="${i}" ${selOrder.indexOf(WD.order[i])>=0?'checked':''}> ${escapeHtml(v.name)}</label>`; }
+  sigList.innerHTML=h; sigList.style.display='block';
+  sigList.querySelectorAll('input').forEach(c=>c.onchange=()=>{
+    const id=WD.order[+c.getAttribute('data-i')], k=selOrder.indexOf(id);
+    if(c.checked){ if(k<0) selOrder.push(id); } else if(k>=0) selOrder.splice(k,1);   // append in pick order
+    renderWave(); });
+  $('#slAll').onclick=()=>{selOrder=WD.order.slice();buildSigList();renderWave();};
+  $('#slNone').onclick=()=>{selOrder=[];buildSigList();renderWave();};
+}
+
+function renderWave(){
+  if(!WD) return;
+  const vars=WD.vars, tmax=WD.tmax;
+  const order=selOrder.filter(id=>WD.vars[id]);     // draw in the order signals were picked
+  if(!order.length){ waveArea.innerHTML='<div class="empty">Tick signals on the left to plot them &mdash; they appear in the order you pick.</div>'; _geom=null; $('#wmarker').textContent=''; return; }
+  const labelW=170, rowH=40, top=14, padR=20, ymid=rowH/2;
+  const W=Math.max(560, waveArea.clientWidth-4);
+  const plotX=labelW, plotW=W-plotX-padR;
+  let vw=(viewSpan==null||viewSpan>=tmax)?tmax:viewSpan;
+  if(viewSpan==null||viewSpan>=tmax) view0=0;
+  view0=Math.max(0,Math.min(tmax-vw,view0));
+  const px=plotW/vw, X=t=>plotX+(t-view0)*px;
+  const H=top+order.length*rowH+34;
+  _geom={plotX,plotW,vw,view0,tmax};
+  const NS='http://www.w3.org/2000/svg';
+  const svg=document.createElementNS(NS,'svg');
+  svg.setAttribute('width',W); svg.setAttribute('height',H);
+  const add=(tag,at,par)=>{const e=document.createElementNS(NS,tag);for(const k in at)e.setAttribute(k,at[k]);(par||svg).appendChild(e);return e;};
+
+  // clip plot region so zoomed traces never spill over the name column
+  const defs=add('defs',{}); const cp=add('clipPath',{id:'pc'},defs);
+  add('rect',{x:plotX,y:0,width:plotW,height:H},cp);
+  const G=add('g',{'clip-path':'url(#pc)'});
+  add('line',{x1:plotX,y1:0,x2:plotX,y2:top+order.length*rowH+2,stroke:'#e2e6ec'});
+
+  order.forEach((id,i)=>{
+    const v=vars[id], y=top+i*rowH, hi=y+6, lo=y+rowH-12;
+    add('text',{x:10,y:y+ymid+4,fill:'#15191f','font-size':12}).textContent=v.name;
+    const vals=v.vals.length?v.vals.slice():[[0,'x']];
+    if(vals[0][0]>0) vals.unshift([0,'x']);
+    for(let k=0;k<vals.length;k++){
+      const t0=vals[k][0], val=vals[k][1], t1=(k+1<vals.length)?vals[k+1][0]:tmax;
+      if(t1<view0 || t0>view0+vw) continue;
+      const x0=X(t0), x1=X(t1), bad=/[xz]/i.test(val), isX=/x/i.test(val);
+      const fillU=isX?'#15191f':'#9aa3af', wv=Math.max(0,x1-x0);   // unknown fill: x dark, z gray
+      if(v.width===1){
+        if(bad){
+          add('rect',{x:x0,y:hi,width:wv,height:lo-hi,fill:fillU,opacity:isX?.85:.45},G);
+        } else {
+          const yy=val==='1'?hi:lo;
+          add('line',{x1:x0,y1:yy,x2:x1,y2:yy,stroke:'var(--wave)','stroke-width':1.5},G);
+          if(k>0) add('line',{x1:x0,y1:hi,x2:x0,y2:lo,stroke:'var(--wave)','stroke-width':1,opacity:.6},G);
+        }
+      } else {
+        if(bad){
+          add('rect',{x:x0+1,y:hi,width:Math.max(0,wv-2),height:lo-hi,fill:fillU,opacity:isX?.8:.45},G);
+          if(x1-x0>20) add('text',{x:(x0+x1)/2,y:y+ymid+4,fill:isX?'#fff':'#15191f','font-size':11,'text-anchor':'middle'},G)
+            .textContent=isX?'x':'z';
+        } else {
+          add('line',{x1:x0+2,y1:hi,x2:x1-2,y2:hi,stroke:'var(--wave)','stroke-width':1.4},G);
+          add('line',{x1:x0+2,y1:lo,x2:x1-2,y2:lo,stroke:'var(--wave)','stroke-width':1.4},G);
+          add('line',{x1:x0,y1:y+ymid,x2:x0+2,y2:hi,stroke:'var(--wave)','stroke-width':1.4},G);
+          add('line',{x1:x0,y1:y+ymid,x2:x0+2,y2:lo,stroke:'var(--wave)','stroke-width':1.4},G);
+          if(x1-x0>26) add('text',{x:(x0+x1)/2,y:y+ymid+4,fill:'#15191f','font-size':11,'text-anchor':'middle'},G)
+            .textContent=fmt(v,val);
+        }
+      }
+    }
+  });
+
+  // time axis for the visible window
+  const ay=top+order.length*rowH+16;
+  add('line',{x1:plotX,y1:ay,x2:plotX+plotW,y2:ay,stroke:'#e2e6ec'});
+  const step=niceStep(vw);
+  for(let t=Math.ceil(view0/step)*step; t<=view0+vw+1e-9; t+=step){ const x=X(t);   // ticks at exact integer times
+    add('line',{x1:x,y1:ay-3,x2:x,y2:ay+3,stroke:'#aab2bd'});
+    add('text',{x:x,y:ay+16,fill:'#677083','font-size':10,'text-anchor':'middle'}).textContent=fmtTime(t); }
+
+  // time cursor (black) + per-signal value readout (black, left of plot); time shown in toolbar
+  if(curT!=null){
+    const ct=Math.max(0,Math.min(tmax,Math.round(curT)));
+    if(ct>=view0 && ct<=view0+vw){ const cx=X(ct);
+      add('line',{x1:cx,y1:top-4,x2:cx,y2:ay,stroke:'#15191f','stroke-width':1}); }
+    order.forEach((id,i)=>{ const v=vars[id], y=top+i*rowH;
+      add('text',{x:plotX-8,y:y+ymid+4,fill:'#15191f','font-size':11,'text-anchor':'end','font-weight':600})
+        .textContent=fmt(v,valAt(v,ct)); });
+    $('#wmarker').textContent='Marker: '+fmtTime(ct);
+  } else $('#wmarker').textContent='';
+
+  $('#wrange').textContent=fmtTime(Math.round(view0))+' – '+fmtTime(Math.round(view0+vw))
+    + (vw<tmax ? '  ('+(tmax/vw).toFixed(1)+'×)' : '');
+  waveArea.innerHTML=''; waveArea.appendChild(svg);
+}
+
+/* zoom (wheel, centred on pointer) · pan (drag) · cursor (click) */
+waveArea.addEventListener('wheel',e=>{
+  if(!_geom) return; e.preventDefault();
+  const x=e.clientX-waveArea.getBoundingClientRect().left;
+  const tm=_geom.view0+(x-_geom.plotX)/_geom.plotW*_geom.vw;
+  const f=e.deltaY<0?0.8:1.25, minS=Math.max(1,_geom.tmax/100000);
+  let nw=Math.max(minS,Math.min(_geom.tmax,_geom.vw*f));
+  if(nw>=_geom.tmax){ viewSpan=null; view0=0; }
+  else { viewSpan=nw; view0=Math.max(0,Math.min(_geom.tmax-nw, tm-(x-_geom.plotX)/_geom.plotW*nw)); }
+  renderWave();
+},{passive:false});
+let _drag=null;
+waveArea.addEventListener('mousedown',e=>{ if(!_geom)return; _drag={x:e.clientX,v0:_geom.view0,moved:false}; });
+window.addEventListener('mousemove',e=>{ if(!_drag||!_geom)return;
+  const dx=e.clientX-_drag.x; if(Math.abs(dx)>4)_drag.moved=true;
+  if(_drag.moved){ view0=Math.max(0,Math.min(_geom.tmax-_geom.vw,_drag.v0-dx/_geom.plotW*_geom.vw)); renderWave(); } });
+window.addEventListener('mouseup',e=>{ if(!_drag)return;
+  if(!_drag.moved && _geom){ const x=e.clientX-waveArea.getBoundingClientRect().left;
+    let t=_geom.view0+(x-_geom.plotX)/_geom.plotW*_geom.vw; curT=Math.max(0,Math.min(_geom.tmax,t)); renderWave(); }
+  _drag=null; });
+$('#wfit').onclick=()=>{ viewSpan=null; view0=0; renderWave(); };
+window.addEventListener('resize',()=>{ if(WD) renderWave(); });
+
+/* drag the splitter to resize the console/waveform panel */
+(function(){
+  const split=$('#vsplit'), bottom=$('#bottom'); let dragging=false;
+  split.addEventListener('mousedown',e=>{ dragging=true; document.body.style.userSelect='none'; e.preventDefault(); });
+  window.addEventListener('mousemove',e=>{ if(!dragging) return;
+    const total=document.documentElement.clientHeight;
+    const h=Math.max(110, Math.min(total-150, total-e.clientY-3));
+    bottom.style.height=h+'px';
+  });
+  window.addEventListener('mouseup',()=>{ if(!dragging) return; dragging=false; document.body.style.userSelect='';
+    if(tbED) tbED.refresh(); if(dgED) dgED.refresh(); if(WD) renderWave(); });
+})();
+/* ---------- shareable links: ?design=<url>&testbench=<url> auto-load files from raw GitHub (or same-site paths) ---------- */
+function rawGithubUrl(u){                               // turn a github.com /blob/ page link into its raw.githubusercontent.com link
+  try{
+    const url=new URL(u, location.href);
+    if(url.hostname==='github.com'){
+      const m=url.pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/);
+      if(m) return 'https://raw.githubusercontent.com/'+m[1]+'/'+m[2]+'/'+m[3];
+    }
+    return url.href;
+  }catch(_){ return u; }
+}
+async function fetchVerilog(u){                          // fetch one .v file as plain text (cleaned of smart/invisible chars)
+  const url=rawGithubUrl(String(u||'').trim());
+  if(!url) return null;
+  const res=await fetch(url,{cache:'no-store'});
+  if(!res.ok) throw new Error('HTTP '+res.status+' for '+url);
+  return sanitize(await res.text());
+}
+async function loadFromUrls(dURL,tURL){                  // fetch+place both panes; either one optional; throws on failure
+  dURL=String(dURL||'').trim(); tURL=String(tURL||'').trim();
+  if(!dURL && !tURL) return false;
+  const [d,t]=await Promise.all([                        // load both in parallel
+    dURL?fetchVerilog(dURL):Promise.resolve(null),
+    tURL?fetchVerilog(tURL):Promise.resolve(null)
+  ]);
+  if(d!=null) setDesign(d);
+  if(t!=null) setTB(t);
+  if(tbED) tbED.refresh(); if(dgED) dgED.refresh();
+  log('loaded from URL'+(dURL?'  design='+dURL:'')+(tURL?'  testbench='+tURL:''),'sys');
+  return true;
+}
+
+/* ---------- inline code links: #d=<base64url>&t=<base64url> (self-contained, no hosting needed) ---------- */
+function b64urlDecode(s){
+  s=String(s||'').replace(/-/g,'+').replace(/_/g,'/');
+  while(s.length%4) s+='=';
+  const bytes=Uint8Array.from(atob(s), c=>c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);                 // UTF-8 safe (Turkish chars ok)
+}
+function b64urlEncode(str){
+  const bytes=new TextEncoder().encode(String(str||''));
+  let bin=''; for(const b of bytes) bin+=String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+
+/* auto-load inline code from the hash: #d=<b64url>&t=<b64url>  (runs before the ?design= URL loader) */
+(function(){
+  const h=new URLSearchParams((location.hash||'').replace(/^#/,''));
+  const dB=h.get('d'), tB=h.get('t');
+  if(!dB && !tB) return;                                  // no hash code -> leave editors alone
+  try{
+    if(dB!=null) setDesign(sanitize(b64urlDecode(dB)));
+    if(tB!=null) setTB(sanitize(b64urlDecode(tB)));
+    if(tbED) tbED.refresh(); if(dgED) dgED.refresh();
+    log('loaded inline code from link','sys');
+  }catch(err){
+    log('inline link decode failed: '+((err&&err.message)||err),'err');
+  }
+})();
+
+/* auto-load on open: ?design=<url>&testbench=<url> */
+(async function(){
+  const q=new URLSearchParams(location.search);
+  const dURL=q.get('design'), tURL=q.get('testbench');
+  if(!dURL && !tURL) return;                             // no params -> leave the blank editors alone
+  try{ await loadFromUrls(dURL,tURL); }
+  catch(err){
+    const msg=(err&&err.message)?err.message:String(err);
+    log('URL load failed: '+msg,'err');
+    alert('Could not load files from the URL parameters.\n\n'+msg+
+      '\n\nUse raw links (raw.githubusercontent.com/...) or paths on this same site. '+
+      'A normal github.com/.../blob/... page link is converted automatically. '+
+      'The host must allow cross-origin (CORS) requests.');
+  }
+})();
+
+/* ---------- manual load: URL button + two-field dialog (modal built in JS so it can't half-load) ---------- */
+(function(){
+  // Sample pairs are just prefilled examples — any github.com or raw link works in the fields.
+  const SAMPLES=[
+    ['full adder',    'https://github.com/senolgulgonul/verilog/blob/main/fulladder.v',          'https://github.com/senolgulgonul/verilog/blob/main/fulladder_tb.v'],
+    ['half adder',    'https://github.com/senolgulgonul/verilog/blob/main/halfadder.v',          'https://github.com/senolgulgonul/verilog/blob/main/halfadder_tb.v'],
+    ['2-to-4 decoder','https://github.com/senolgulgonul/verilog/blob/main/two_to_four_decoder.v','https://github.com/senolgulgonul/verilog/blob/main/two_to_four_decoder_tb.v'],
+    ['two gates',     'https://github.com/senolgulgonul/verilog/blob/main/twogates.v',           'https://github.com/senolgulgonul/verilog/blob/main/twogates_tb.v']
+  ];
+
+  // build the dialog once and attach to <body>
+  const bg=document.createElement('div');
+  bg.className='modal-bg'; bg.id='urlModal';
+  bg.innerHTML=
+    '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="urlTitle">'
+    +'<h3 id="urlTitle">Load from URL</h3>'
+    +'<p>Paste any GitHub file link &mdash; a normal <code>github.com/&hellip;/blob/&hellip;</code> page link or a '
+    +'<code>raw.githubusercontent.com/&hellip;</code> link (a same-site path works too). Either field may be left blank.</p>'
+    +'<label for="urlDesign">design.v URL</label>'
+    +'<input type="text" id="urlDesign" spellcheck="false" placeholder="https://github.com/USER/REPO/blob/BRANCH/design.v">'
+    +'<label for="urlTb">testbench.v URL</label>'
+    +'<input type="text" id="urlTb" spellcheck="false" placeholder="https://github.com/USER/REPO/blob/BRANCH/testbench.v">'
+    +'<div class="hint">Sample pairs (click to fill, then Load):<div class="chips" id="urlChips"></div></div>'
+    +'<div class="err" id="urlErr"></div>'
+    +'<div class="row">'
+      +'<button class="ghost" id="urlShare" title="Copy a shareable ?design=&amp;testbench= link">Copy share link</button>'
+      +'<button class="ghost" id="urlCodeShare" title="Copy a self-contained #d=&amp;t= link with the current editor code">Copy code link</button>'
+      +'<span class="copied" id="urlCopied"></span>'
+      +'<span class="grp"><button class="ghost" id="urlCancel">Cancel</button><button class="primary" id="urlLoad">Load</button></span>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(bg);
+
+  const q=sel=>bg.querySelector(sel);
+  const dIn=q('#urlDesign'), tIn=q('#urlTb'), errEl=q('#urlErr'),
+        loadBtn=q('#urlLoad'), copied=q('#urlCopied');
+  const setErr=m=>{ errEl.textContent=m||''; };
+  const open =()=>{ setErr(''); copied.textContent=''; bg.classList.add('on'); setTimeout(()=>dIn.focus(),0); };
+  const close=()=>bg.classList.remove('on');
+
+  // sample chips
+  const chips=q('#urlChips');
+  SAMPLES.forEach(([label,d,t])=>{
+    const b=document.createElement('button');
+    b.className='chip'; b.textContent=label;
+    b.onclick=()=>{ dIn.value=d; tIn.value=t; setErr(''); copied.textContent=''; };
+    chips.appendChild(b);
+  });
+
+  // header button: wire it if present, otherwise create one in the header so the feature always works
+  let trigger=document.querySelector('#urlBtn');
+  if(!trigger){
+    trigger=document.createElement('button');
+    trigger.id='urlBtn'; trigger.textContent='URL…';
+    trigger.title='Load design.v and testbench.v from URLs';
+    const gen=document.querySelector('#gen'), run=document.querySelector('#run');
+    if(gen&&gen.parentNode) gen.parentNode.insertBefore(trigger,gen);
+    else if(run&&run.parentNode) run.parentNode.insertBefore(trigger,run);
+    else (document.querySelector('header')||document.body).appendChild(trigger);
+  }
+  trigger.onclick=open;
+
+  q('#urlCancel').onclick=close;
+  bg.addEventListener('mousedown',e=>{ if(e.target===bg) close(); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape' && bg.classList.contains('on')) close(); });
+
+  async function doLoad(){
+    if(!dIn.value.trim() && !tIn.value.trim()){ setErr('Enter at least one URL.'); return; }
+    if(!isPristine() && !confirm('The editors contain code — loading will replace it. Continue?')) return;
+    setErr(''); loadBtn.disabled=true; loadBtn.textContent='Loading…';
+    try{ await loadFromUrls(dIn.value,tIn.value); close(); }
+    catch(err){ setErr((err&&err.message)?err.message:String(err)); }
+    finally{ loadBtn.disabled=false; loadBtn.textContent='Load'; }
+  }
+  loadBtn.onclick=doLoad;
+  [dIn,tIn].forEach(el=>el.addEventListener('keydown',e=>{ if(e.key==='Enter') doLoad(); }));
+
+  // copy a shareable link built from the two fields
+  q('#urlShare').onclick=async()=>{
+    const d=dIn.value.trim(), t=tIn.value.trim();
+    if(!d && !t){ setErr('Enter at least one URL to build a share link.'); return; }
+    const p=new URLSearchParams();
+    if(d) p.set('design',d); if(t) p.set('testbench',t);
+    const link=location.origin+location.pathname+'?'+p.toString();
+    try{ await navigator.clipboard.writeText(link); copied.textContent='copied'; }
+    catch(_){ copied.textContent=''; prompt('Copy this share link:',link); }
+    setTimeout(()=>{ copied.textContent=''; },1800);
+  };
+
+  // copy a self-contained link that embeds the CURRENT editor code (no hosting needed)
+  q('#urlCodeShare').onclick=async()=>{
+    const d=getDesign().trim(), t=getTB().trim();
+    if(!d && !t){ setErr('Editors are empty, nothing to encode into a code link.'); return; }
+    const p=new URLSearchParams();
+    if(d) p.set('d',b64urlEncode(d)); if(t) p.set('t',b64urlEncode(t));
+    const link=location.origin+location.pathname+'#'+p.toString();
+    try{ await navigator.clipboard.writeText(link); copied.textContent='copied'; }
+    catch(_){ copied.textContent=''; prompt('Copy this code link:',link); }
+    setTimeout(()=>{ copied.textContent=''; },1800);
+  };
+})();
+
+status('engine ready &mdash; press Run');
+</script>
+</body>
+</html>
