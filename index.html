@@ -151,7 +151,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.29</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.30</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -799,6 +799,34 @@ async function loadFromUrls(dURL,tURL){                  // fetch+place both pan
   return true;
 }
 
+/* ---------- inline code links: #d=<base64url>&t=<base64url> (self-contained, no hosting needed) ---------- */
+function b64urlDecode(s){
+  s=String(s||'').replace(/-/g,'+').replace(/_/g,'/');
+  while(s.length%4) s+='=';
+  const bytes=Uint8Array.from(atob(s), c=>c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);                 // UTF-8 safe (Turkish chars ok)
+}
+function b64urlEncode(str){
+  const bytes=new TextEncoder().encode(String(str||''));
+  let bin=''; for(const b of bytes) bin+=String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+
+/* auto-load inline code from the hash: #d=<b64url>&t=<b64url>  (runs before the ?design= URL loader) */
+(function(){
+  const h=new URLSearchParams((location.hash||'').replace(/^#/,''));
+  const dB=h.get('d'), tB=h.get('t');
+  if(!dB && !tB) return;                                  // no hash code -> leave editors alone
+  try{
+    if(dB!=null) setDesign(sanitize(b64urlDecode(dB)));
+    if(tB!=null) setTB(sanitize(b64urlDecode(tB)));
+    if(tbED) tbED.refresh(); if(dgED) dgED.refresh();
+    log('loaded inline code from link','sys');
+  }catch(err){
+    log('inline link decode failed: '+((err&&err.message)||err),'err');
+  }
+})();
+
 /* auto-load on open: ?design=<url>&testbench=<url> */
 (async function(){
   const q=new URLSearchParams(location.search);
@@ -841,6 +869,7 @@ async function loadFromUrls(dURL,tURL){                  // fetch+place both pan
     +'<div class="err" id="urlErr"></div>'
     +'<div class="row">'
       +'<button class="ghost" id="urlShare" title="Copy a shareable ?design=&amp;testbench= link">Copy share link</button>'
+      +'<button class="ghost" id="urlCodeShare" title="Copy a self-contained #d=&amp;t= link with the current editor code">Copy code link</button>'
       +'<span class="copied" id="urlCopied"></span>'
       +'<span class="grp"><button class="ghost" id="urlCancel">Cancel</button><button class="primary" id="urlLoad">Load</button></span>'
     +'</div>'
@@ -900,6 +929,18 @@ async function loadFromUrls(dURL,tURL){                  // fetch+place both pan
     const link=location.origin+location.pathname+'?'+p.toString();
     try{ await navigator.clipboard.writeText(link); copied.textContent='copied'; }
     catch(_){ copied.textContent=''; prompt('Copy this share link:',link); }
+    setTimeout(()=>{ copied.textContent=''; },1800);
+  };
+
+  // copy a self-contained link that embeds the CURRENT editor code (no hosting needed)
+  q('#urlCodeShare').onclick=async()=>{
+    const d=getDesign().trim(), t=getTB().trim();
+    if(!d && !t){ setErr('Editors are empty, nothing to encode into a code link.'); return; }
+    const p=new URLSearchParams();
+    if(d) p.set('d',b64urlEncode(d)); if(t) p.set('t',b64urlEncode(t));
+    const link=location.origin+location.pathname+'#'+p.toString();
+    try{ await navigator.clipboard.writeText(link); copied.textContent='copied'; }
+    catch(_){ copied.textContent=''; prompt('Copy this code link:',link); }
     setTimeout(()=>{ copied.textContent=''; },1800);
   };
 })();
