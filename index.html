@@ -737,6 +737,47 @@ window.addEventListener('resize',()=>{ if(WD) renderWave(); });
   window.addEventListener('mouseup',()=>{ if(!dragging) return; dragging=false; document.body.style.userSelect='';
     if(tbED) tbED.refresh(); if(dgED) dgED.refresh(); if(WD) renderWave(); });
 })();
+/* ---------- shareable links: ?design=<url>&testbench=<url> auto-load files from raw GitHub (or same-site paths) ---------- */
+function rawGithubUrl(u){                               // turn a github.com /blob/ page link into its raw.githubusercontent.com link
+  try{
+    const url=new URL(u, location.href);
+    if(url.hostname==='github.com'){
+      const m=url.pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/);
+      if(m) return 'https://raw.githubusercontent.com/'+m[1]+'/'+m[2]+'/'+m[3];
+    }
+    return url.href;
+  }catch(_){ return u; }
+}
+async function fetchVerilog(u){                          // fetch one .v file as plain text (cleaned of smart/invisible chars)
+  const url=rawGithubUrl(String(u||'').trim());
+  if(!url) return null;
+  const res=await fetch(url,{cache:'no-store'});
+  if(!res.ok) throw new Error('HTTP '+res.status+' for '+url);
+  return sanitize(await res.text());
+}
+(async function(){
+  const q=new URLSearchParams(location.search);
+  const dURL=q.get('design'), tURL=q.get('testbench');
+  if(!dURL && !tURL) return;                             // no params -> leave the blank editors alone
+  try{
+    const [d,t]=await Promise.all([                      // load both in parallel; either one is optional
+      dURL?fetchVerilog(dURL):Promise.resolve(null),
+      tURL?fetchVerilog(tURL):Promise.resolve(null)
+    ]);
+    if(d!=null) setDesign(d);
+    if(t!=null) setTB(t);
+    if(tbED) tbED.refresh(); if(dgED) dgED.refresh();
+    log('loaded from URL'+(dURL?'  design='+dURL:'')+(tURL?'  testbench='+tURL:''),'sys');
+  }catch(err){
+    const msg=(err&&err.message)?err.message:String(err);
+    log('URL load failed: '+msg,'err');
+    alert('Could not load files from the URL parameters.\n\n'+msg+
+      '\n\nUse raw links (raw.githubusercontent.com/...) or paths on this same site. '+
+      'A normal github.com/.../blob/... page link is converted automatically. '+
+      'The host must allow cross-origin (CORS) requests.');
+  }
+})();
+
 status('engine ready &mdash; press Run');
 </script>
 </body>
