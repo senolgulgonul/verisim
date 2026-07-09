@@ -151,7 +151,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.30</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.31</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -450,23 +450,34 @@ async function run(){
     status('preprocessing&hellip;');
     const d0=getDesign(), t0=getTB(), d=sanitize(d0), t=sanitize(t0);
     if(d!==d0||t!==t0) log('Note: normalized non-standard characters from pasted text (non-breaking spaces / smart quotes).','sys');
+    const tPP0=performance.now();
     const pp=await preprocessAll([{name:'design.v',src:d},{name:'tb.v',src:t}]);
+    const tPP=performance.now()-tPP0;
     status('compiling&hellip;');
+    const tC0=performance.now();
     const c=await compile(pp,g);
+    const tC=performance.now()-tC0;
     if(!c.vvp){ const e=c.err.split('\n').filter(l=>!/system\.vpi|dynamic linking not enabled/.test(l)).join('\n');
       log(e||'Compilation failed.','err'); status('compile error'); show('console'); return; }
     const warn=c.err.split('\n').filter(l=>!/system\.vpi|dynamic linking not enabled/.test(l)).join('\n');
     if(warn.trim()) log(warn,'warn');
     status('simulating&hellip;');
+    const tS0=performance.now();
     const s=await simulate(c.vvp);
+    const tS=performance.now()-tS0;
     log(s.out.trim()? s.out : '(no console output)', s.out.trim()?'out':'sys');
-    if(s.vcd){ lastVCD=s.vcd; WD=parseVCD(s.vcd);
+    let tW=0;
+    if(s.vcd){ lastVCD=s.vcd; const tW0=performance.now(); WD=parseVCD(s.vcd); tW=performance.now()-tW0;
       const byName={}; for(const id of WD.order) byName[WD.vars[id].name]=id;
       selOrder=prevNames.map(n=>byName[n]).filter(Boolean);   // [] on first run; keeps picks on re-run
       buildSigList(); renderWave();
       $('#dlvcd').style.display='inline'; }
     else { WD=null; selOrder=[]; lastVCD=null; $('#siglist').style.display='none';
       $('#wavearea').innerHTML='<div class="empty">No waveform — add $dumpfile("dump.vcd"); and $dumpvars(0, tb); to the testbench.</div>'; }
+    const fmt=x=>(x>=100?Math.round(x):x.toFixed(1));
+    log('timings ms: preprocess='+fmt(tPP)+' compile='+fmt(tC)+' simulate='+fmt(tS)
+        +(s.vcd?(' vcd-parse='+fmt(tW)+' (vcd '+(s.vcd.length/1024>=1024?(s.vcd.length/1048576).toFixed(1)+' MB':Math.round(s.vcd.length/1024)+' KB')+')'):'')
+        +' total='+fmt(tPP+tC+tS+tW)+' (incl. per-stage WASM init)','sys');
     status('done',true);
   }catch(e){ log('Engine error: '+(e&&e.message||e),'err'); status('error'); show('console'); }
   finally{ b.disabled=false; }
