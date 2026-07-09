@@ -151,7 +151,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.31</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.32</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -823,8 +823,10 @@ function b64urlEncode(str){
   return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 }
 
-/* auto-load inline code from the hash: #d=<b64url>&t=<b64url>  (runs before the ?design= URL loader) */
-(function(){
+/* load inline code from the hash: #d=<b64url>&t=<b64url>
+   runs on page open AND on hashchange, so clicking a code link into an
+   already-open VeriSim tab loads without a reload (v1.32) */
+function loadFromHash(){
   const h=new URLSearchParams((location.hash||'').replace(/^#/,''));
   const dB=h.get('d'), tB=h.get('t');
   if(!dB && !tB) return;                                  // no hash code -> leave editors alone
@@ -836,7 +838,9 @@ function b64urlEncode(str){
   }catch(err){
     log('inline link decode failed: '+((err&&err.message)||err),'err');
   }
-})();
+}
+loadFromHash();
+window.addEventListener('hashchange', loadFromHash);
 
 /* auto-load on open: ?design=<url>&testbench=<url> */
 (async function(){
