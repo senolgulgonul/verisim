@@ -3,6 +3,12 @@
   Verisim — browser-based Verilog simulator (Icarus Verilog -> WASM)
   Files required next to this index.html:  ivlpp.js/.wasm  ivl.js/.wasm  vvp.js/.wasm
   Serve over HTTP:  python3 -m http.server 8090   ->   http://localhost:8090/
+
+  v1.33  2026-10-15  single tabbed editor (EDA-Playground style): testbench.v and design.v
+                     are always there, "+" adds more files. Extra files are written into the
+                     virtual filesystem of the preprocessor and the simulator, so
+                     `include "x.v" and $readmemb("x.txt") work in the browser.
+                     Code links carry them as #...&f=<base64url JSON [[name,text],...]>
 -->
 <html lang="en">
 <head>
@@ -91,6 +97,14 @@
     font-family:var(--mono);font-size:11px;padding:2px 9px;cursor:pointer}
   .pane h2 .lnk:hover{border-color:var(--accent);color:var(--accent)}
   .pane .editor{flex:1;min-height:0;position:relative}
+  .pane h2 #tabs{display:flex;align-items:flex-end;gap:2px;overflow-x:auto;min-width:0;margin:-6px 0 -7px -12px;padding:4px 0 0 8px;align-self:stretch}
+  .ftab{display:flex;align-items:center;gap:6px;background:#e7eaef;border:1px solid var(--edge);border-bottom:none;border-radius:6px 6px 0 0;
+    padding:4px 10px;font-family:var(--mono);font-size:12.5px;color:var(--ink-dim);cursor:pointer;white-space:nowrap;user-select:none}
+  .ftab.active{background:#fff;color:var(--ink);font-weight:600;border-color:var(--accent);border-bottom:1px solid #fff;margin-bottom:-1px}
+  .ftab .x{color:var(--ink-faint);font-size:13px;line-height:1;padding:0 1px;border-radius:3px}
+  .ftab .x:hover{color:#fff;background:var(--bad)}
+  .ftab.add{background:transparent;border:1px dashed var(--edge);color:var(--accent);font-weight:600;padding:3px 9px}
+  .ftab.add:hover{border-color:var(--accent)}
   textarea{width:100%;height:100%;border:none;resize:none;outline:none;background:#fff;color:var(--ink);
     padding:12px 14px;font-family:var(--mono);font-size:13.5px;line-height:1.55;tab-size:2}
   .CodeMirror{height:100%!important;background:#fff;color:var(--ink);font-family:var(--mono);font-size:13.5px;line-height:1.55}
@@ -151,7 +165,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver">v1.32</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver" title="2026-10-15">v1.33</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -171,12 +185,9 @@
 </header>
 
 <main>
-  <section class="pane"><h2><span class="dot"></span> testbench.v<span class="grow"></span>
-      <button class="lnk" id="tbClear">clear</button><button class="lnk" id="tbOpen">open</button><button class="lnk" id="tbSave">save</button></h2>
-    <div class="editor"><textarea id="tb" spellcheck="false"></textarea></div></section>
-  <section class="pane"><h2><span class="dot"></span> design.v<span class="grow"></span>
-      <button class="lnk" id="dgClear">clear</button><button class="lnk" id="dgOpen">open</button><button class="lnk" id="dgSave">save</button></h2>
-    <div class="editor"><textarea id="design" spellcheck="false"></textarea></div></section>
+  <section class="pane"><h2><span class="dot"></span><div id="tabs"></div><span class="grow"></span>
+      <button class="lnk" id="fClear" title="Clear the active file">clear</button><button class="lnk" id="fOpen" title="Load a local file into the active tab">open</button><button class="lnk" id="fSave" title="Download the active file">save</button></h2>
+    <div class="editor"><textarea id="src" spellcheck="false"></textarea></div></section>
 </main>
 
 <div id="vsplit" title="Drag to resize"></div>
@@ -226,34 +237,78 @@ function sanitize(s){                                 // fix invisible/smart cha
           .replace(/[\u201C\u201D\u201E\u201F\u2033]/g,'"');
 }
 
-/* ---------- editors ---------- */
-let tbED,dgED;
+/* ---------- editors: one CodeMirror, tabbed files (v1.33) ---------- */
+let ED=null;
 const BLANK_DESIGN=`// design.v — write your module here, or load one from Examples
 
 `;
 const BLANK_TB=`// testbench.v — write your testbench here, or load one from Examples
 
 `;
+const FIXED=['testbench.v','design.v'];               // always present, cannot be closed
+let files=[{name:'testbench.v',src:BLANK_TB},{name:'design.v',src:BLANK_DESIGN}];
+let active=0;
+const isVerilogName=n=>/\.(v|sv|vh|svh|verilog)$/i.test(n);
 (function(){
-  $('#tb').value=BLANK_TB; $('#design').value=BLANK_DESIGN;
+  $('#src').value=files[0].src;
   if(window.CodeMirror){
     const o={lineNumbers:true,mode:'verilog',tabSize:2,indentUnit:2};
-    tbED=CodeMirror.fromTextArea($('#tb'),o); dgED=CodeMirror.fromTextArea($('#design'),o);
+    ED=CodeMirror.fromTextArea($('#src'),o);
   }
+  renderTabs();
 })();
-const getTB=()=>tbED?tbED.getValue():$('#tb').value;
-const getDesign=()=>dgED?dgED.getValue():$('#design').value;
-const setTB=t=>{ if(tbED) tbED.setValue(t); else $('#tb').value=t; };
-const setDesign=t=>{ if(dgED) dgED.setValue(t); else $('#design').value=t; };
-
-const isPristine=()=> (getTB().trim()===''||getTB()===BLANK_TB) && (getDesign().trim()===''||getDesign()===BLANK_DESIGN);
-function loadPair(d,t){                               // replace both editors, warn if real code would be lost
-  if(getDesign()===d && getTB()===t) return true;     // identical -> nothing to lose
-  if(!isPristine() && !confirm('The editor contains code — it will be lost if replaced (use "save" first if needed). Continue?')) return false;
-  setDesign(d); setTB(t); return true;
+const edGet=()=>ED?ED.getValue():$('#src').value;
+const edSet=t=>{ if(ED) ED.setValue(t); else $('#src').value=t; };
+const syncActive=()=>{ files[active].src=edGet(); };          // editor -> model
+function renderTabs(){
+  const box=$('#tabs'); box.innerHTML='';
+  files.forEach((f,i)=>{
+    const t=document.createElement('span'); t.className='ftab'+(i===active?' active':''); t.textContent=f.name; t.title=f.name;
+    t.onclick=()=>switchTo(i);
+    if(!FIXED.includes(f.name)){ const x=document.createElement('span'); x.className='x'; x.textContent='\u00d7'; x.title='close '+f.name;
+      x.onclick=e=>{ e.stopPropagation(); closeFile(i); }; t.appendChild(x); }
+    box.appendChild(t);
+  });
+  const add=document.createElement('span'); add.className='ftab add'; add.textContent='+'; add.title='Add a file (e.g. testvectors.txt or halfadder.v for `include)';
+  add.onclick=addFile; box.appendChild(add);
 }
-function openInto(setter){                            // load a local .v file into one editor
-  const inp=document.createElement('input'); inp.type='file'; inp.accept='.v,.sv,.vh,.svh,.txt';
+function switchTo(i){
+  if(i===active){ return; } syncActive(); active=i;
+  if(ED) ED.setOption('mode', isVerilogName(files[i].name)?'verilog':null);
+  edSet(files[i].src); if(ED) ED.refresh(); renderTabs();
+}
+function cleanName(n){ return String(n||'').trim().replace(/[\/\\]/g,''); }
+function addFile(name,src){
+  if(typeof name!=='string'){ name=prompt('File name (e.g. testvectors.txt, or halfadder.v to `include it):','testvectors.txt'); }
+  name=cleanName(name); if(!name) return null;
+  const i=files.findIndex(f=>f.name===name);
+  if(i>=0){ if(src!=null) files[i].src=src; switchTo(i); return i; }
+  syncActive(); files.push({name, src: src!=null?src:''}); switchTo(files.length-1); return files.length-1;
+}
+function closeFile(i){
+  if(FIXED.includes(files[i].name)) return;
+  if(files[i].src.trim()!=='' && !confirm(files[i].name+' will be closed — its contents will be lost. Continue?')) return;
+  files.splice(i,1); if(active>=i && active>0) active--; if(active>=files.length) active=files.length-1;
+  if(ED) ED.setOption('mode', isVerilogName(files[active].name)?'verilog':null);
+  edSet(files[active].src); renderTabs();
+}
+const closeExtras=()=>{ syncActive(); files=files.filter(f=>FIXED.includes(f.name)); if(active>=files.length) active=0; edSet(files[active].src); renderTabs(); };
+const getFile=n=>{ syncActive(); const f=files.find(f=>f.name===n); return f?f.src:''; };
+const setFile=(n,t)=>{ syncActive(); const f=files.find(f=>f.name===n); if(f){ f.src=t; if(files[active]===f) edSet(t); } else addFile(n,t); };
+const extraFiles=()=>{ syncActive(); return files.filter(f=>!FIXED.includes(f.name)).map(f=>({name:f.name, src:f.src.endsWith('\n')?f.src:f.src+'\n'})); };
+const getTB=()=>getFile('testbench.v');
+const getDesign=()=>getFile('design.v');
+const setTB=t=>setFile('testbench.v',t);
+const setDesign=t=>setFile('design.v',t);
+
+const isPristine=()=> (getTB().trim()===''||getTB()===BLANK_TB) && (getDesign().trim()===''||getDesign()===BLANK_DESIGN) && extraFiles().length===0;
+function loadPair(d,t){                               // replace both main files, warn if real code would be lost
+  if(getDesign()===d && getTB()===t && extraFiles().length===0) return true;     // identical -> nothing to lose
+  if(!isPristine() && !confirm('The editor contains code — it will be lost if replaced (use "save" first if needed). Continue?')) return false;
+  closeExtras(); setDesign(d); setTB(t); return true;
+}
+function openInto(setter){                            // load a local file into the active tab
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='.v,.sv,.vh,.svh,.txt,.hex,.mem,.dat,text/plain';
   inp.onchange=()=>{ const f=inp.files[0]; if(!f) return;
     const r=new FileReader(); r.onload=()=>setter(String(r.result)); r.readAsText(f); };
   inp.click();
@@ -262,16 +317,14 @@ function saveText(name,text){                        // download editor contents
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));
   a.download=name; a.click(); URL.revokeObjectURL(a.href);
 }
-$('#tbOpen').onclick=()=>openInto(setTB);
-$('#tbSave').onclick=()=>saveText('testbench.v',getTB());
-$('#dgOpen').onclick=()=>openInto(setDesign);
-$('#dgSave').onclick=()=>saveText('design.v',getDesign());
+$('#fOpen').onclick=()=>openInto(t=>{ edSet(t); syncActive(); });
+$('#fSave').onclick=()=>{ syncActive(); saveText(files[active].name, files[active].src); };
 function clearPane(get,set,blank){                   // OK -> clear this pane only; Cancel -> nothing
   if(get().trim()===''||get()===blank){ set(blank); return; }   // already empty: just reset, no prompt
-  if(confirm('This pane will be cleared — its contents will be lost. Continue?')) set(blank);
+  if(confirm(files[active].name+' will be cleared — its contents will be lost. Continue?')) set(blank);
 }
-$('#tbClear').onclick=()=>clearPane(getTB,setTB,BLANK_TB);
-$('#dgClear').onclick=()=>clearPane(getDesign,setDesign,BLANK_DESIGN);
+$('#fClear').onclick=()=>{ const n=files[active].name;
+  clearPane(edGet, t=>{ edSet(t); syncActive(); }, n==='testbench.v'?BLANK_TB:n==='design.v'?BLANK_DESIGN:''); };
 
 /* ---------- example library: one circuit (half adder), three modeling styles ---------- */
 const HA_TB = title => `\`timescale 1ns/1ps
@@ -410,10 +463,11 @@ functor:cprop
 functor:nodangle
 flag:DLL=vvp.tgt
 `;
-async function preprocessAll(files){       // ONE ivlpp pass over all sources -> shared macro table
+async function preprocessAll(files, extra=[]){   // ONE ivlpp pass over all sources -> shared macro table
   const code=[];
   const m=await initIvlpp({print:s=>code.push(s),printErr:()=>{}});
   const args=['-L'];                       // -L: emit `line directives so ivl errors map to the right file
+  for(const f of extra) m.FS.writeFile('/'+f.name, f.src);   // extra tabs: available to `include, not compiled on their own (v1.33)
   for(const f of files){                   // positional sources feed ivlpp's source_list (command order)
     m.FS.writeFile('/'+f.name, f.src.endsWith('\n')?f.src:f.src+'\n');
     args.push('/'+f.name);
@@ -430,10 +484,11 @@ async function compile(srcText,g){
   let vvp=null; try{vvp=m.FS.readFile('/out.vvp');}catch(e){}
   return {vvp, err:err.join('\n')};
 }
-async function simulate(bytes){
+async function simulate(bytes, extra=[]){
   const out=[];
   const m=await initVvp({print:s=>out.push(s),printErr:s=>out.push(s)});
   m.FS.writeFile('/sim.vvp', bytes);
+  for(const f of extra) m.FS.writeFile('/'+f.name, f.src);   // extra tabs: available to $readmemb/$readmemh/$fopen (v1.33)
   m.callMain(['/sim.vvp']);
   let vcd=null; try{vcd=m.FS.readFile('/dump.vcd',{encoding:'utf8'});}catch(e){}
   return {out:out.join('\n'), vcd};
@@ -451,7 +506,8 @@ async function run(){
     const d0=getDesign(), t0=getTB(), d=sanitize(d0), t=sanitize(t0);
     if(d!==d0||t!==t0) log('Note: normalized non-standard characters from pasted text (non-breaking spaces / smart quotes).','sys');
     const tPP0=performance.now();
-    const pp=await preprocessAll([{name:'design.v',src:d},{name:'tb.v',src:t}]);
+    const extra=extraFiles().map(f=>({name:f.name, src:sanitize(f.src)}));
+    const pp=await preprocessAll([{name:'design.v',src:d},{name:'tb.v',src:t}], extra);
     const tPP=performance.now()-tPP0;
     status('compiling&hellip;');
     const tC0=performance.now();
@@ -463,7 +519,7 @@ async function run(){
     if(warn.trim()) log(warn,'warn');
     status('simulating&hellip;');
     const tS0=performance.now();
-    const s=await simulate(c.vvp);
+    const s=await simulate(c.vvp, extra);
     const tS=performance.now()-tS0;
     log(s.out.trim()? s.out : '(no console output)', s.out.trim()?'out':'sys');
     let tW=0;
@@ -531,7 +587,8 @@ async function synthesize(mode){
     synInfo('Synthesizing ('+mode+')…');
     const readCmd=(gen==='2005'?'read_verilog design.v; ':'read_verilog -sv design.v; ');  // match the sim's language setting
     const out = await run(['-q','-p',readCmd+SYN_SCRIPT[mode]],
-      { 'design.v': new TextEncoder().encode(src) },
+      Object.assign({ 'design.v': new TextEncoder().encode(src) },
+        Object.fromEntries(extraFiles().filter(f=>isVerilogName(f.name)).map(f=>[f.name,new TextEncoder().encode(sanitize(f.src))]))),   // `include'd tabs (v1.33)
       { stdout:x=>{ logBuf+=synBytesToStr(x); }, stderr:x=>{ logBuf+=synBytesToStr(x); } });
     const raw = out && out['out.json'];
     if(!raw) throw new Error('no netlist produced');
@@ -776,7 +833,7 @@ window.addEventListener('resize',()=>{ if(WD) renderWave(); });
     bottom.style.height=h+'px';
   });
   window.addEventListener('mouseup',()=>{ if(!dragging) return; dragging=false; document.body.style.userSelect='';
-    if(tbED) tbED.refresh(); if(dgED) dgED.refresh(); if(WD) renderWave(); });
+    if(ED) ED.refresh(); if(WD) renderWave(); });
 })();
 /* ---------- shareable links: ?design=<url>&testbench=<url> auto-load files from raw GitHub (or same-site paths) ---------- */
 function rawGithubUrl(u){                               // turn a github.com /blob/ page link into its raw.githubusercontent.com link
@@ -805,7 +862,7 @@ async function loadFromUrls(dURL,tURL){                  // fetch+place both pan
   ]);
   if(d!=null) setDesign(d);
   if(t!=null) setTB(t);
-  if(tbED) tbED.refresh(); if(dgED) dgED.refresh();
+  if(ED) ED.refresh();
   log('loaded from URL'+(dURL?'  design='+dURL:'')+(tURL?'  testbench='+tURL:''),'sys');
   return true;
 }
@@ -828,12 +885,15 @@ function b64urlEncode(str){
    already-open VeriSim tab loads without a reload (v1.32) */
 function loadFromHash(){
   const h=new URLSearchParams((location.hash||'').replace(/^#/,''));
-  const dB=h.get('d'), tB=h.get('t');
-  if(!dB && !tB) return;                                  // no hash code -> leave editors alone
+  const dB=h.get('d'), tB=h.get('t'), fB=h.get('f');
+  if(!dB && !tB && !fB) return;                           // no hash code -> leave editors alone
   try{
+    closeExtras();                                        // a link defines the whole file set
     if(dB!=null) setDesign(sanitize(b64urlDecode(dB)));
     if(tB!=null) setTB(sanitize(b64urlDecode(tB)));
-    if(tbED) tbED.refresh(); if(dgED) dgED.refresh();
+    if(fB!=null){ for(const [n,src] of JSON.parse(b64urlDecode(fB))) addFile(cleanName(n), String(src)); }   // extra tabs (v1.33)
+    switchTo(0);
+    if(ED) ED.refresh();
     log('loaded inline code from link','sys');
   }catch(err){
     log('inline link decode failed: '+((err&&err.message)||err),'err');
@@ -949,10 +1009,11 @@ window.addEventListener('hashchange', loadFromHash);
 
   // copy a self-contained link that embeds the CURRENT editor code (no hosting needed)
   q('#urlCodeShare').onclick=async()=>{
-    const d=getDesign().trim(), t=getTB().trim();
-    if(!d && !t){ setErr('Editors are empty, nothing to encode into a code link.'); return; }
+    const d=getDesign().trim(), t=getTB().trim(), ex=extraFiles();
+    if(!d && !t && !ex.length){ setErr('Editors are empty, nothing to encode into a code link.'); return; }
     const p=new URLSearchParams();
     if(d) p.set('d',b64urlEncode(d)); if(t) p.set('t',b64urlEncode(t));
+    if(ex.length) p.set('f',b64urlEncode(JSON.stringify(ex.map(f=>[f.name,f.src]))));   // extra tabs (v1.33)
     const link=location.origin+location.pathname+'#'+p.toString();
     try{ await navigator.clipboard.writeText(link); copied.textContent='copied'; }
     catch(_){ copied.textContent=''; prompt('Copy this code link:',link); }
