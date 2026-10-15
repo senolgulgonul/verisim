@@ -103,7 +103,8 @@
     font-family:var(--mono);font-size:11px;padding:2px 9px;cursor:pointer}
   .pane h2 .lnk:hover{border-color:var(--accent);color:var(--accent)}
   .pane .editor{flex:1;min-height:0;position:relative}
-  .pane h2 #tabs{display:flex;align-items:flex-end;gap:2px;overflow-x:auto;min-width:0;margin:-6px 0 -7px -12px;padding:4px 0 0 8px;align-self:stretch}
+  .pane h2 #tabs{display:flex;align-items:flex-end;gap:2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;min-width:0;margin:-6px 0 -7px -12px;padding:4px 0 0 8px;align-self:stretch}
+  .pane h2 #tabs::-webkit-scrollbar{display:none}   /* strip stays scrollable with many tabs, but no visible bar (v1.35) */
   .ftab{display:flex;align-items:center;gap:6px;background:#e7eaef;border:1px solid var(--edge);border-bottom:none;border-radius:6px 6px 0 0;
     padding:4px 10px;font-family:var(--mono);font-size:12.5px;color:var(--ink-dim);cursor:pointer;white-space:nowrap;user-select:none}
   .ftab.active{background:#fff;color:var(--ink);font-weight:600;border-color:var(--accent);border-bottom:1px solid #fff;margin-bottom:-1px}
