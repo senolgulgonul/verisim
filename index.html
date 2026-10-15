@@ -9,6 +9,12 @@
                      virtual filesystem of the preprocessor and the simulator, so
                      `include "x.v" and $readmemb("x.txt") work in the browser.
                      Code links carry them as #...&f=<base64url JSON [[name,text],...]>
+  v1.34  2026-10-15  double-click a tab to rename it. The first two tabs keep their roles
+                     (testbench, design) whatever they are called; the compiler sees the real
+                     names, so errors read "senol.v:12:". Links carry the names as &tn=&dn=.
+  v1.35  2026-10-15  console shows the equivalent iverilog/vvp command line before each run;
+                     "zip" downloads all tabs plus run.sh/run.bat as a project archive
+                     (store-only zip written in plain JS, no library).
 -->
 <html lang="en">
 <head>
@@ -165,7 +171,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver" title="2026-10-15">v1.33</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver" title="2026-10-15">v1.35</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -186,7 +192,7 @@
 
 <main>
   <section class="pane"><h2><span class="dot"></span><div id="tabs"></div><span class="grow"></span>
-      <button class="lnk" id="fClear" title="Clear the active file">clear</button><button class="lnk" id="fOpen" title="Load a local file into the active tab">open</button><button class="lnk" id="fSave" title="Download the active file">save</button></h2>
+      <button class="lnk" id="fClear" title="Clear the active file">clear</button><button class="lnk" id="fOpen" title="Load a local file into the active tab">open</button><button class="lnk" id="fSave" title="Download the active file">save</button><button class="lnk" id="fZip" title="Download all tabs + run.sh/run.bat as a zip project">zip</button></h2>
     <div class="editor"><textarea id="src" spellcheck="false"></textarea></div></section>
 </main>
 
@@ -245,7 +251,8 @@ const BLANK_DESIGN=`// design.v — write your module here, or load one from Exa
 const BLANK_TB=`// testbench.v — write your testbench here, or load one from Examples
 
 `;
-const FIXED=['testbench.v','design.v'];               // always present, cannot be closed
+const DEFAULT_NAMES=['testbench.v','design.v'];       // tab 0 = testbench role, tab 1 = design role: always present, renamable, not closable (v1.34)
+const isRole=i=>i<2;
 let files=[{name:'testbench.v',src:BLANK_TB},{name:'design.v',src:BLANK_DESIGN}];
 let active=0;
 const isVerilogName=n=>/\.(v|sv|vh|svh|verilog)$/i.test(n);
@@ -263,9 +270,10 @@ const syncActive=()=>{ files[active].src=edGet(); };          // editor -> model
 function renderTabs(){
   const box=$('#tabs'); box.innerHTML='';
   files.forEach((f,i)=>{
-    const t=document.createElement('span'); t.className='ftab'+(i===active?' active':''); t.textContent=f.name; t.title=f.name;
-    t.onclick=()=>switchTo(i);
-    if(!FIXED.includes(f.name)){ const x=document.createElement('span'); x.className='x'; x.textContent='\u00d7'; x.title='close '+f.name;
+    const t=document.createElement('span'); t.className='ftab'+(i===active?' active':''); t.textContent=f.name;
+    t.title=(i===0?'testbench':i===1?'design':'extra file (`include / $readmemb)')+' \u2014 double-click to rename';
+    t.onclick=()=>switchTo(i); t.ondblclick=e=>{ e.preventDefault(); renameFile(i); };
+    if(!isRole(i)){ const x=document.createElement('span'); x.className='x'; x.textContent='\u00d7'; x.title='close '+f.name;
       x.onclick=e=>{ e.stopPropagation(); closeFile(i); }; t.appendChild(x); }
     box.appendChild(t);
   });
@@ -285,27 +293,35 @@ function addFile(name,src){
   if(i>=0){ if(src!=null) files[i].src=src; switchTo(i); return i; }
   syncActive(); files.push({name, src: src!=null?src:''}); switchTo(files.length-1); return files.length-1;
 }
+function renameFile(i){                               // v1.34
+  const n=cleanName(prompt('Rename '+files[i].name+' to:', files[i].name)); if(!n || n===files[i].name) return;
+  if(files.some((f,k)=>k!==i && f.name===n)){ alert('A tab named '+n+' already exists.'); return; }
+  files[i].name=n; if(i===active && ED) ED.setOption('mode', isVerilogName(n)?'verilog':null); renderTabs();
+}
 function closeFile(i){
-  if(FIXED.includes(files[i].name)) return;
+  if(isRole(i)) return;
   if(files[i].src.trim()!=='' && !confirm(files[i].name+' will be closed — its contents will be lost. Continue?')) return;
   files.splice(i,1); if(active>=i && active>0) active--; if(active>=files.length) active=files.length-1;
   if(ED) ED.setOption('mode', isVerilogName(files[active].name)?'verilog':null);
   edSet(files[active].src); renderTabs();
 }
-const closeExtras=()=>{ syncActive(); files=files.filter(f=>FIXED.includes(f.name)); if(active>=files.length) active=0; edSet(files[active].src); renderTabs(); };
-const getFile=n=>{ syncActive(); const f=files.find(f=>f.name===n); return f?f.src:''; };
-const setFile=(n,t)=>{ syncActive(); const f=files.find(f=>f.name===n); if(f){ f.src=t; if(files[active]===f) edSet(t); } else addFile(n,t); };
-const extraFiles=()=>{ syncActive(); return files.filter(f=>!FIXED.includes(f.name)).map(f=>({name:f.name, src:f.src.endsWith('\n')?f.src:f.src+'\n'})); };
-const getTB=()=>getFile('testbench.v');
-const getDesign=()=>getFile('design.v');
-const setTB=t=>setFile('testbench.v',t);
-const setDesign=t=>setFile('design.v',t);
+const closeExtras=()=>{ syncActive(); files=files.slice(0,2); if(active>=files.length) active=0;
+  if(ED) ED.setOption('mode', isVerilogName(files[active].name)?'verilog':null); edSet(files[active].src); renderTabs(); };
+const resetNames=()=>{ files[0].name=DEFAULT_NAMES[0]; files[1].name=DEFAULT_NAMES[1]; renderTabs(); };
+const roleGet=i=>{ syncActive(); return files[i].src; };
+const roleSet=(i,t)=>{ syncActive(); files[i].src=t; if(active===i) edSet(t); };
+const extraFiles=()=>{ syncActive(); return files.slice(2).map(f=>({name:f.name, src:f.src.endsWith('\n')?f.src:f.src+'\n'})); };
+const getTB=()=>roleGet(0);
+const getDesign=()=>roleGet(1);
+const setTB=t=>roleSet(0,t);
+const setDesign=t=>roleSet(1,t);
+const tbName=()=>files[0].name, designName=()=>files[1].name;
 
 const isPristine=()=> (getTB().trim()===''||getTB()===BLANK_TB) && (getDesign().trim()===''||getDesign()===BLANK_DESIGN) && extraFiles().length===0;
 function loadPair(d,t){                               // replace both main files, warn if real code would be lost
   if(getDesign()===d && getTB()===t && extraFiles().length===0) return true;     // identical -> nothing to lose
   if(!isPristine() && !confirm('The editor contains code — it will be lost if replaced (use "save" first if needed). Continue?')) return false;
-  closeExtras(); setDesign(d); setTB(t); return true;
+  closeExtras(); resetNames(); setDesign(d); setTB(t); return true;
 }
 function openInto(setter){                            // load a local file into the active tab
   const inp=document.createElement('input'); inp.type='file'; inp.accept='.v,.sv,.vh,.svh,.txt,.hex,.mem,.dat,text/plain';
@@ -319,12 +335,47 @@ function saveText(name,text){                        // download editor contents
 }
 $('#fOpen').onclick=()=>openInto(t=>{ edSet(t); syncActive(); });
 $('#fSave').onclick=()=>{ syncActive(); saveText(files[active].name, files[active].src); };
+
+/* ---------- equivalent command line (v1.35): what a student would type with a local Icarus install ---------- */
+function cmdLines(){
+  const g=$('#gen').value;
+  return ['iverilog -g'+g+' -o out.vvp '+designName()+' '+tbName(), 'vvp out.vvp'];
+}
+
+/* ---------- project zip (v1.35): minimal STORE-only zip writer, no library ---------- */
+const CRC_T=(()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
+const crc32=b=>{ let c=0xFFFFFFFF; for(let i=0;i<b.length;i++) c=CRC_T[(c^b[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; };
+function makeZip(entries){                              // entries: [{name, text}] -> Blob
+  const enc=new TextEncoder(), parts=[], central=[]; let off=0;
+  const d=new Date(), dosT=(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1), dosD=((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate();
+  const u16=v=>[v&255,(v>>8)&255], u32=v=>[v&255,(v>>8)&255,(v>>16)&255,(v>>>24)&255];
+  for(const e of entries){
+    const name=enc.encode(e.name), data=enc.encode(e.text), crc=crc32(data);
+    const loc=new Uint8Array([0x50,0x4b,3,4, ...u16(20), ...u16(0x800), ...u16(0), ...u16(dosT), ...u16(dosD), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0)]);
+    parts.push(loc,name,data);
+    central.push(new Uint8Array([0x50,0x4b,1,2, ...u16(20), ...u16(20), ...u16(0x800), ...u16(0), ...u16(dosT), ...u16(dosD), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off)]), name);
+    off+=loc.length+name.length+data.length;
+  }
+  const cdSize=central.reduce((a,b)=>a+b.length,0);
+  const end=new Uint8Array([0x50,0x4b,5,6, ...u16(0), ...u16(0), ...u16(entries.length), ...u16(entries.length), ...u32(cdSize), ...u32(off), ...u16(0)]);
+  return new Blob([...parts,...central,end],{type:'application/zip'});
+}
+$('#fZip').onclick=()=>{
+  syncActive();
+  const [c1,c2]=cmdLines();
+  const entries=files.map(f=>({name:f.name, text:f.src.endsWith('\n')?f.src:f.src+'\n'}));
+  entries.push({name:'run.sh',  text:'#!/bin/sh\n# generated by VeriSim — needs Icarus Verilog (iverilog, vvp) and optionally GTKWave\n'+c1+' && '+c2+'\n'});
+  entries.push({name:'run.bat', text:'@echo off\r\nrem generated by VeriSim - needs Icarus Verilog (iverilog, vvp) on PATH\r\n'+c1+'\r\nif %errorlevel% neq 0 exit /b %errorlevel%\r\n'+c2+'\r\npause\r\n'});
+  const base=designName().replace(/\.[^.]*$/,'')||'verisim';
+  const a=document.createElement('a'); a.href=URL.createObjectURL(makeZip(entries)); a.download=base+'_project.zip'; a.click(); URL.revokeObjectURL(a.href);
+  log('downloaded '+base+'_project.zip ('+entries.length+' files)','sys');
+};
 function clearPane(get,set,blank){                   // OK -> clear this pane only; Cancel -> nothing
   if(get().trim()===''||get()===blank){ set(blank); return; }   // already empty: just reset, no prompt
   if(confirm(files[active].name+' will be cleared — its contents will be lost. Continue?')) set(blank);
 }
-$('#fClear').onclick=()=>{ const n=files[active].name;
-  clearPane(edGet, t=>{ edSet(t); syncActive(); }, n==='testbench.v'?BLANK_TB:n==='design.v'?BLANK_DESIGN:''); };
+$('#fClear').onclick=()=>{
+  clearPane(edGet, t=>{ edSet(t); syncActive(); }, active===0?BLANK_TB:active===1?BLANK_DESIGN:''); };
 
 /* ---------- example library: one circuit (half adder), three modeling styles ---------- */
 const HA_TB = title => `\`timescale 1ns/1ps
@@ -503,11 +554,12 @@ async function run(){
   const g=$('#gen').value;
   try{
     status('preprocessing&hellip;');
+    for(const c of cmdLines()) log('$ '+c,'sys');          // equivalent local command line (v1.35)
     const d0=getDesign(), t0=getTB(), d=sanitize(d0), t=sanitize(t0);
     if(d!==d0||t!==t0) log('Note: normalized non-standard characters from pasted text (non-breaking spaces / smart quotes).','sys');
     const tPP0=performance.now();
     const extra=extraFiles().map(f=>({name:f.name, src:sanitize(f.src)}));
-    const pp=await preprocessAll([{name:'design.v',src:d},{name:'tb.v',src:t}], extra);
+    const pp=await preprocessAll([{name:designName(),src:d},{name:tbName(),src:t}], extra);   // real tab names (v1.34)
     const tPP=performance.now()-tPP0;
     status('compiling&hellip;');
     const tC0=performance.now();
@@ -575,7 +627,7 @@ async function synthesize(mode){
   synActivated=true;
   if(synBusy) return;                                                        // reentrancy guard
   const src = sanitize(getDesign());
-  if(src.replace(/\/\/[^\n]*/g,'').replace(/\/\*[\s\S]*?\*\//g,'').trim()===''){ synEmpty('design.v is empty — write a module first.'); return; }
+  if(src.replace(/\/\/[^\n]*/g,'').replace(/\/\*[\s\S]*?\*\//g,'').trim()===''){ synEmpty(designName()+' is empty — write a module first.'); return; }
   const gen=$('#gen').value;
   const key=gen+'\u0000'+src;                                                // generation affects parsing
   if(key!==synSrc){ synCache={gates:null,rtl:null}; synSrc=key; }            // editor/gen changed → stale cache
@@ -585,9 +637,10 @@ async function synthesize(mode){
   try{
     const run = await loadYosys();
     synInfo('Synthesizing ('+mode+')…');
-    const readCmd=(gen==='2005'?'read_verilog design.v; ':'read_verilog -sv design.v; ');  // match the sim's language setting
+    const dn=designName();
+    const readCmd=(gen==='2005'?'read_verilog '+dn+'; ':'read_verilog -sv '+dn+'; ');  // match the sim's language setting
     const out = await run(['-q','-p',readCmd+SYN_SCRIPT[mode]],
-      Object.assign({ 'design.v': new TextEncoder().encode(src) },
+      Object.assign({ [dn]: new TextEncoder().encode(src) },
         Object.fromEntries(extraFiles().filter(f=>isVerilogName(f.name)).map(f=>[f.name,new TextEncoder().encode(sanitize(f.src))]))),   // `include'd tabs (v1.33)
       { stdout:x=>{ logBuf+=synBytesToStr(x); }, stderr:x=>{ logBuf+=synBytesToStr(x); } });
     const raw = out && out['out.json'];
@@ -599,7 +652,7 @@ async function synthesize(mode){
     const errLines = logBuf.split('\n').filter(l=>/error/i.test(l)).slice(0,8).join('\n').trim();
     const msg = errLines || (e&&e.message) || String(e);   // prefer Yosys's own error lines
     synEmpty('<b>Synthesis error</b><br><pre style="white-space:pre-wrap;margin:6px 0;font-size:11px">'+escapeHtml(msg)+'</pre>'
-      +'<span class="dim">Only design.v is synthesized (not the testbench). Non-synthesizable constructs (#delays, $display, initial) can\'t be synthesized.</span>');
+      +'<span class="dim">Only '+designName()+' is synthesized (not the testbench). Non-synthesizable constructs (#delays, $display, initial) can\'t be synthesized.</span>');
     synInfo('');
   }
   finally{ synBusy=false; $('#synRun').disabled=false; }
@@ -860,9 +913,10 @@ async function loadFromUrls(dURL,tURL){                  // fetch+place both pan
     dURL?fetchVerilog(dURL):Promise.resolve(null),
     tURL?fetchVerilog(tURL):Promise.resolve(null)
   ]);
-  if(d!=null) setDesign(d);
-  if(t!=null) setTB(t);
-  if(ED) ED.refresh();
+  const base=u=>cleanName(decodeURIComponent(String(u).split(/[?#]/)[0].split('/').pop()||''));
+  if(d!=null){ setDesign(d); const n=base(dURL); if(n && !files.some((f,k)=>k!==1&&f.name===n)) files[1].name=n; }   // name tabs after the files (v1.34)
+  if(t!=null){ setTB(t);     const n=base(tURL); if(n && !files.some((f,k)=>k!==0&&f.name===n)) files[0].name=n; }
+  renderTabs(); if(ED) ED.refresh();
   log('loaded from URL'+(dURL?'  design='+dURL:'')+(tURL?'  testbench='+tURL:''),'sys');
   return true;
 }
@@ -885,10 +939,12 @@ function b64urlEncode(str){
    already-open VeriSim tab loads without a reload (v1.32) */
 function loadFromHash(){
   const h=new URLSearchParams((location.hash||'').replace(/^#/,''));
-  const dB=h.get('d'), tB=h.get('t'), fB=h.get('f');
+  const dB=h.get('d'), tB=h.get('t'), fB=h.get('f'), dn=h.get('dn'), tn=h.get('tn');
   if(!dB && !tB && !fB) return;                           // no hash code -> leave editors alone
   try{
-    closeExtras();                                        // a link defines the whole file set
+    closeExtras(); resetNames();                          // a link defines the whole file set
+    if(tn) files[0].name=cleanName(tn)||DEFAULT_NAMES[0];  // tab names (v1.34)
+    if(dn) files[1].name=cleanName(dn)||DEFAULT_NAMES[1];
     if(dB!=null) setDesign(sanitize(b64urlDecode(dB)));
     if(tB!=null) setTB(sanitize(b64urlDecode(tB)));
     if(fB!=null){ for(const [n,src] of JSON.parse(b64urlDecode(fB))) addFile(cleanName(n), String(src)); }   // extra tabs (v1.33)
@@ -1014,6 +1070,7 @@ window.addEventListener('hashchange', loadFromHash);
     const p=new URLSearchParams();
     if(d) p.set('d',b64urlEncode(d)); if(t) p.set('t',b64urlEncode(t));
     if(ex.length) p.set('f',b64urlEncode(JSON.stringify(ex.map(f=>[f.name,f.src]))));   // extra tabs (v1.33)
+    if(tbName()!==DEFAULT_NAMES[0]) p.set('tn',tbName()); if(designName()!==DEFAULT_NAMES[1]) p.set('dn',designName());   // renamed tabs (v1.34)
     const link=location.origin+location.pathname+'#'+p.toString();
     try{ await navigator.clipboard.writeText(link); copied.textContent='copied'; }
     catch(_){ copied.textContent=''; prompt('Copy this code link:',link); }
