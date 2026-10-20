@@ -27,6 +27,10 @@
                      (e.g. a DFF reduced to q=0). netlistsvg rewrites constant bits ("0","1")
                      in the JSON it renders, so the cached netlist was corrupted after the
                      first draw; render() now gets a structuredClone of the cached JSON.
+  v1.39  2026-10-20  waveform: the names column shows each signal's value at the marker,
+                     GTKWave style ("clk =1", buses in hex). The old readout had been drawn at
+                     x=-8 inside the svg since the v1.37 column split, i.e. invisible. The
+                     auto width of the column now accounts for the value text.
 -->
 <html lang="en">
 <head>
@@ -179,8 +183,10 @@
   #wtools #wmarker{color:#15191f;font-family:var(--mono);font-size:12px;font-weight:600}
   #wavearea{flex:1;overflow:auto;position:relative;display:flex;align-items:flex-start}
   #wnames{flex:none;font-family:var(--mono);font-size:12px;color:#15191f;background:#fff;white-space:nowrap;overflow:hidden}
-  #wnames div{height:40px;line-height:40px;padding:0 8px;text-overflow:ellipsis;overflow:hidden;direction:rtl;text-align:left}
-  #wnames div span{direction:ltr;unicode-bidi:bidi-override}
+  #wnames div{height:40px;line-height:40px;padding:0 8px;display:flex;gap:6px}
+  #wnames div .nm{flex:1 1 auto;min-width:0;text-overflow:ellipsis;overflow:hidden;direction:rtl;text-align:left}
+  #wnames div .nm span{direction:ltr;unicode-bidi:bidi-override}
+  #wnames div .val{flex:none;font-weight:600}                   /* value at the marker, GTKWave style "clk =1" (v1.39) */
   #nsplit{flex:none;width:7px;align-self:stretch;background:var(--edge);cursor:col-resize;position:relative}
   #nsplit::after{content:"";position:absolute;top:50%;left:2px;height:38px;width:3px;margin-top:-19px;border-radius:2px;background:#b8bfc9}
   #nsplit:hover{background:var(--accent)} #nsplit:hover::after{background:#fff}
@@ -192,7 +198,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver" title="2026-10-19">v1.38</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver" title="2026-10-20">v1.39</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -808,9 +814,11 @@ function renderWave(){
   // shared by all signals in the dump), capped at 45% of the area; the user can drag #nsplit to override.
   const pre=scopePrefix(WD.order.map(id=>vars[id].name));
   const shown=order.map(id=>vars[id].name.slice(pre.length));
+  const ct=curT!=null ? Math.max(0,Math.min(tmax,Math.round(curT))) : null;      // marker time (v1.39: computed early, the names column shows values at it)
+  const vtxt=order.map(id=>ct!=null ? '='+fmt(vars[id],valAt(vars[id],ct)) : '');   // GTKWave style: "clk =1", "cnt =3a"
   const txtW=t=>t.length*7.3+18;                                // 12px monospace ≈ 7.3px per char + padding
   const nameW=nameWUser!=null ? Math.max(60, Math.min(total*0.6, nameWUser))
-                              : Math.max(90, Math.min(Math.floor(total*0.45), Math.ceil(Math.max(...shown.map(txtW)))));
+                              : Math.max(90, Math.min(Math.floor(total*0.45), Math.ceil(Math.max(...shown.map((t,i)=>txtW(t+' '+vtxt[i]))))));
   const splitW=7;
   const W=total-nameW-splitW;                                   // svg width
   const plotX=0, plotW=W-padR;                                  // waves start at the left edge of the svg
@@ -873,14 +881,10 @@ function renderWave(){
     add('line',{x1:x,y1:ay-3,x2:x,y2:ay+3,stroke:'#aab2bd'});
     add('text',{x:x,y:ay+16,fill:'#677083','font-size':10,'text-anchor':'middle'}).textContent=fmtTime(t); }
 
-  // time cursor (black) + per-signal value readout (black, left of plot); time shown in toolbar
-  if(curT!=null){
-    const ct=Math.max(0,Math.min(tmax,Math.round(curT)));
+  // time cursor (black); the per-signal values at the marker are in the names column, time in the toolbar
+  if(ct!=null){
     if(ct>=view0 && ct<=view0+vw){ const cx=X(ct);
       add('line',{x1:cx,y1:top-4,x2:cx,y2:ay,stroke:'#15191f','stroke-width':1}); }
-    order.forEach((id,i)=>{ const v=vars[id], y=top+i*rowH;
-      add('text',{x:plotX-8,y:y+ymid+4,fill:'#15191f','font-size':11,'text-anchor':'end','font-weight':600})
-        .textContent=fmt(v,valAt(v,ct)); });
     $('#wmarker').textContent='Marker: '+fmtTime(ct);
   } else $('#wmarker').textContent='';
 
@@ -888,8 +892,11 @@ function renderWave(){
     + (vw<tmax ? '  ('+(tmax/vw).toFixed(1)+'×)' : '');
   // names column + divider + svg, all inside the one scrolling #wavearea so they scroll together
   const nm=document.createElement('div'); nm.id='wnames'; nm.style.width=nameW+'px'; nm.style.paddingTop=top+'px';
-  order.forEach((id,i)=>{ const d=document.createElement('div'); d.title=vars[id].name;
-    const sp=document.createElement('span'); sp.textContent=shown[i]; d.appendChild(sp); nm.appendChild(d); });
+  order.forEach((id,i)=>{ const d=document.createElement('div'); d.title=vars[id].name+(vtxt[i]?'  '+vtxt[i]:'');
+    const nmd=document.createElement('div'); nmd.className='nm';
+    const sp=document.createElement('span'); sp.textContent=shown[i]; nmd.appendChild(sp); d.appendChild(nmd);
+    if(vtxt[i]){ const vl=document.createElement('span'); vl.className='val'; vl.textContent=vtxt[i]; d.appendChild(vl); }
+    nm.appendChild(d); });
   const ns=document.createElement('div'); ns.id='nsplit'; ns.title='Drag to resize the name column';
   ns.onmousedown=e=>{ nDrag=true; document.body.style.userSelect='none'; e.preventDefault(); e.stopPropagation(); };
   waveArea.innerHTML=''; waveArea.appendChild(nm); waveArea.appendChild(ns); waveArea.appendChild(svg);
