@@ -134,15 +134,9 @@ module testbench;
         fw[272] = 32'h6379636d; fw[273] = 32'h003d656c; fw[274] = 32'h6e696d20; fw[275] = 32'h65727473;
         fw[276] = 32'h00003d74;
         // FIRMWARE-END
-        // load it into the four byte lanes of the block RAM
-        for (i = 0; i < (1 << 12); i = i + 1) begin
-            dut.u_ram.lane0[i] = 8'h00;  dut.u_ram.lane1[i] = 8'h00;
-            dut.u_ram.lane2[i] = 8'h00;  dut.u_ram.lane3[i] = 8'h00;
-        end
-        for (i = 0; i < FW_WORDS; i = i + 1) begin
-            dut.u_ram.lane0[i] = fw[i][7:0];    dut.u_ram.lane1[i] = fw[i][15:8];
-            dut.u_ram.lane2[i] = fw[i][23:16];  dut.u_ram.lane3[i] = fw[i][31:24];
-        end
+        // load it into the block RAM (the rest of the memory is cleared)
+        for (i = 0; i < (1 << 12); i = i + 1) dut.u_ram.load_word(i, 32'h0000_0000);
+        for (i = 0; i < FW_WORDS;  i = i + 1) dut.u_ram.load_word(i, fw[i]);
     end
 
     // ---- send one character to the SoC's UART receiver ----

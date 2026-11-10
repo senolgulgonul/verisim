@@ -9,7 +9,7 @@
 //    rv_core     : 4-stage pipeline top level
 //
 //  SoC modules (second half of this file)
-//    soc_ram     : dual-port byte-writable block RAM (code + data)
+//    soc_ram     : byte-writable block RAM with two read ports (code + data)
 //    soc_gpio    : 8 outputs, 8 inputs, edge interrupt
 //    soc_uart    : 8N1 UART with RX interrupt
 //    soc_timer   : 64-bit mtime / mtimecmp, software interrupt bit
@@ -1025,13 +1025,27 @@ endmodule
 // #############################################################################
 
 // ----------------------------------------------------------------------------
-//  Dual-port RAM, byte-writable  (maps to block RAM)
+//  RAM, byte-writable, two read ports  (maps to block RAM)
 //    port A : read only   (instruction fetch)
 //    port B : read/write  (data bus)
-//  Four separate byte lanes keep the byte-enable logic inferable.
+//
+//  Built from two identical copies that are written together: copy "i" is read
+//  by port A, copy "d" by port B. Each copy then has exactly one write port and
+//  one read port, the simple dual-port pattern that every FPGA tool infers as
+//  block RAM, at the price of using twice the memory bits. Four separate byte
+//  lanes keep the byte write enables inferable as well.
+//
+//  INIT = 1 preloads the memory from four hex files, one per byte lane, with one
+//  2-digit byte per line (see tang-nano-9k/firmware/mkhex.py). In simulation the
+//  testbench can instead call the load_word task.
 // ----------------------------------------------------------------------------
 module soc_ram #(
-    parameter AW = 12                        // 2^AW words
+    parameter AW      = 12,                  // 2^AW words
+    parameter INIT    = 0,
+    parameter INIT_B0 = "firmware_b0.hex",   // bits  7:0
+    parameter INIT_B1 = "firmware_b1.hex",   // bits 15:8
+    parameter INIT_B2 = "firmware_b2.hex",   // bits 23:16
+    parameter INIT_B3 = "firmware_b3.hex"    // bits 31:24
 ) (
     input  wire          clk,
     input  wire [AW-1:0] a_addr,
@@ -1041,21 +1055,70 @@ module soc_ram #(
     input  wire [3:0]    b_wstrb,
     output reg  [31:0]   b_rdata
 );
-    reg [7:0] lane0 [0:(1<<AW)-1];
-    reg [7:0] lane1 [0:(1<<AW)-1];
-    reg [7:0] lane2 [0:(1<<AW)-1];
-    reg [7:0] lane3 [0:(1<<AW)-1];
+    // Fetching a word in the same cycle it is written never matters here (the core
+    // does not execute a word it is just writing). no_rw_check tells Yosys so;
+    // other tools ignore the attribute.
+    (* no_rw_check *) reg [7:0] i0 [0:(1<<AW)-1];   // copy read by port A
+    (* no_rw_check *) reg [7:0] i1 [0:(1<<AW)-1];
+    (* no_rw_check *) reg [7:0] i2 [0:(1<<AW)-1];
+    (* no_rw_check *) reg [7:0] i3 [0:(1<<AW)-1];
+    (* no_rw_check *) reg [7:0] d0 [0:(1<<AW)-1];   // copy read by port B
+    (* no_rw_check *) reg [7:0] d1 [0:(1<<AW)-1];
+    (* no_rw_check *) reg [7:0] d2 [0:(1<<AW)-1];
+    (* no_rw_check *) reg [7:0] d3 [0:(1<<AW)-1];
 
-    always @(posedge clk)
-        a_rdata <= {lane3[a_addr], lane2[a_addr], lane1[a_addr], lane0[a_addr]};
+    generate if (INIT) begin : g_init
+        initial begin
+            $readmemh(INIT_B0, i0);  $readmemh(INIT_B0, d0);
+            $readmemh(INIT_B1, i1);  $readmemh(INIT_B1, d1);
+            $readmemh(INIT_B2, i2);  $readmemh(INIT_B2, d2);
+            $readmemh(INIT_B3, i3);  $readmemh(INIT_B3, d3);
+        end
+    end endgenerate
 
+    // copy "i": written through port B, read through port A (two different addresses)
     always @(posedge clk) begin
-        if (b_wstrb[0]) lane0[b_addr] <= b_wdata[7:0];
-        if (b_wstrb[1]) lane1[b_addr] <= b_wdata[15:8];
-        if (b_wstrb[2]) lane2[b_addr] <= b_wdata[23:16];
-        if (b_wstrb[3]) lane3[b_addr] <= b_wdata[31:24];
-        b_rdata <= {lane3[b_addr], lane2[b_addr], lane1[b_addr], lane0[b_addr]};
+        if (b_wstrb[0]) i0[b_addr] <= b_wdata[7:0];
+        if (b_wstrb[1]) i1[b_addr] <= b_wdata[15:8];
+        if (b_wstrb[2]) i2[b_addr] <= b_wdata[23:16];
+        if (b_wstrb[3]) i3[b_addr] <= b_wdata[31:24];
     end
+    always @(posedge clk) a_rdata <= {i3[a_addr], i2[a_addr], i1[a_addr], i0[a_addr]};
+
+    // copy "d": written and read through port B (one address). A lane is either
+    // written or read in a cycle, never both: this is the "normal" write mode of
+    // a single-port block RAM. Read-before-write, which a plain read next to the
+    // write would ask for, is not available on every device (GW1NR-9C rejects it).
+    // Holding the old read data during a store is fine: the core only uses read
+    // data after a load, and a load never writes.
+    always @(posedge clk) begin
+        if (b_wstrb[0]) d0[b_addr] <= b_wdata[7:0];
+        else            b_rdata[7:0]   <= d0[b_addr];
+    end
+    always @(posedge clk) begin
+        if (b_wstrb[1]) d1[b_addr] <= b_wdata[15:8];
+        else            b_rdata[15:8]  <= d1[b_addr];
+    end
+    always @(posedge clk) begin
+        if (b_wstrb[2]) d2[b_addr] <= b_wdata[23:16];
+        else            b_rdata[23:16] <= d2[b_addr];
+    end
+    always @(posedge clk) begin
+        if (b_wstrb[3]) d3[b_addr] <= b_wdata[31:24];
+        else            b_rdata[31:24] <= d3[b_addr];
+    end
+
+    // synthesis translate_off
+    // Simulation only: write one word into both copies (used by testbenches).
+    task load_word(input integer index, input [31:0] word);
+        begin
+            i0[index] = word[7:0];    d0[index] = word[7:0];
+            i1[index] = word[15:8];   d1[index] = word[15:8];
+            i2[index] = word[23:16];  d2[index] = word[23:16];
+            i3[index] = word[31:24];  d3[index] = word[31:24];
+        end
+    endtask
+    // synthesis translate_on
 endmodule
 
 // ----------------------------------------------------------------------------
@@ -1285,6 +1348,7 @@ endmodule
 // ----------------------------------------------------------------------------
 module soc_top #(
     parameter RAM_AW   = 12,                 // RAM size = 2^RAM_AW words (12 -> 16 KB)
+    parameter RAM_INIT = 0,                  // 1: preload the RAM from firmware_b0..3.hex
     parameter UART_DIV = 16'd234             // clk / baud, e.g. 27 MHz / 115200
 ) (
     input  wire       clk,
@@ -1323,7 +1387,7 @@ module soc_top #(
 
     // ---------------- RAM ----------------
     wire [31:0] ram_rdata;
-    soc_ram #(.AW(RAM_AW)) u_ram (
+    soc_ram #(.AW(RAM_AW), .INIT(RAM_INIT)) u_ram (
         .clk(clk),
         .a_addr(imem_addr[RAM_AW+1:2]), .a_rdata(imem_rdata),
         .b_addr(dmem_addr[RAM_AW+1:2]), .b_wdata(dmem_wdata),

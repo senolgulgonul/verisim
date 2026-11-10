@@ -1,0 +1,19 @@
+// Sipeed Tang Nano 9K (GW1NR-LV9QN88PC6/I5) pin constraints for tang9k_top
+
+IO_LOC  "clk"      52;  IO_PORT "clk"      IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// Push buttons, active low (1.8 V bank)
+IO_LOC  "s1"       4;   IO_PORT "s1"       IO_TYPE=LVCMOS18 PULL_MODE=UP;
+IO_LOC  "s2"       3;   IO_PORT "s2"       IO_TYPE=LVCMOS18 PULL_MODE=UP;
+
+// LEDs, active low (1.8 V bank)
+IO_LOC  "leds[0]"  10;  IO_PORT "leds[0]"  IO_TYPE=LVCMOS18 PULL_MODE=UP DRIVE=8;
+IO_LOC  "leds[1]"  11;  IO_PORT "leds[1]"  IO_TYPE=LVCMOS18 PULL_MODE=UP DRIVE=8;
+IO_LOC  "leds[2]"  13;  IO_PORT "leds[2]"  IO_TYPE=LVCMOS18 PULL_MODE=UP DRIVE=8;
+IO_LOC  "leds[3]"  14;  IO_PORT "leds[3]"  IO_TYPE=LVCMOS18 PULL_MODE=UP DRIVE=8;
+IO_LOC  "leds[4]"  15;  IO_PORT "leds[4]"  IO_TYPE=LVCMOS18 PULL_MODE=UP DRIVE=8;
+IO_LOC  "leds[5]"  16;  IO_PORT "leds[5]"  IO_TYPE=LVCMOS18 PULL_MODE=UP DRIVE=8;
+
+// On-board USB serial bridge
+IO_LOC  "uart_tx"  17;  IO_PORT "uart_tx"  IO_TYPE=LVCMOS33;
+IO_LOC  "uart_rx"  18;  IO_PORT "uart_rx"  IO_TYPE=LVCMOS33 PULL_MODE=UP;
