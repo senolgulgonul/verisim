@@ -31,6 +31,10 @@
                      GTKWave style ("clk =1", buses in hex). The old readout had been drawn at
                      x=-8 inside the svg since the v1.37 column split, i.e. invisible. The
                      auto width of the column now accounts for the value text.
+  v1.41  2026-11-11  Yosys pinned to YoWASP 0.66.1164 (was unpinned "latest": 79 MB and changing
+                     without notice; pinned build is ~12 MB over the network). Do not go below
+                     0.66: older builds reject "abc -g AND,OR". The first synthesis shows the
+                     download progress in the status line (fetchProgress).
 -->
 <html lang="en">
 <head>
@@ -198,7 +202,7 @@
 <body>
 
 <header>
-  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver" title="2026-10-31">v1.40</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
+  <div class="brand"><b>Veri<span>Sim</span></b><span class="ver" title="2026-11-11">v1.41</span><small>Verilog in your browser &middot; Icarus &rarr; WASM</small></div>
   <div class="spacer"></div>
   <select id="examples" title="Load an example or start blank">
     <option value="" selected>Examples&hellip;</option>
@@ -685,7 +689,10 @@ $('#dlvcd').onclick=()=>{ if(!lastVCD)return; const a=document.createElement('a'
 
 /* ============ synthesis (Yosys via YoWASP) + schematic (netlistsvg) ============ */
 let yosysRun=null, synMode='gates', synActivated=false, synBusy=false, synSrc='', synCache={gates:null,rtl:null};
-const SYN_SCRIPT={                                    // verified with native yosys 0.33
+// Pinned on purpose: the unpinned "latest" build is 79 MB and changes without notice.
+// Do not go below 0.66: older builds reject "abc -g AND,OR".
+const YOSYS_VERSION = '0.66.1164';
+const SYN_SCRIPT={                                    // verified with YoWASP Yosys 0.66.1164
   gates:'synth -auto-top -flatten; delete t:$scopeinfo; abc -g AND,OR; opt_clean; write_json out.json',  // AND/OR/NOT only (SOP — truth-table/K-map style)
   rtl:  'prep -auto-top; write_json out.json'                                       // word-level blocks, hierarchy kept
 };
@@ -697,8 +704,8 @@ function synBytesToStr(x){ if(typeof x==='string') return x;
 
 async function loadYosys(){
   if(yosysRun) return yosysRun;
-  synInfo('Loading Yosys (YoWASP, ~8 MB)…');
-  const m = await import('https://cdn.jsdelivr.net/npm/@yowasp/yosys/gen/bundle.js');
+  synInfo('Loading Yosys ' + YOSYS_VERSION + ' (YoWASP, ~12 MB, first time only)…');
+  const m = await import('https://cdn.jsdelivr.net/npm/@yowasp/yosys@' + YOSYS_VERSION + '/gen/bundle.js');
   yosysRun = m.runYosys; return yosysRun;
 }
 async function synthesize(mode){
@@ -720,7 +727,11 @@ async function synthesize(mode){
     const out = await run(['-q','-p',readCmd+SYN_SCRIPT[mode]],
       Object.assign({ [dn]: new TextEncoder().encode(src) },
         Object.fromEntries(extraFiles().filter(f=>isVerilogName(f.name)).map(f=>[f.name,new TextEncoder().encode(sanitize(f.src))]))),   // `include'd tabs (v1.33)
-      { stdout:x=>{ logBuf+=synBytesToStr(x); }, stderr:x=>{ logBuf+=synBytesToStr(x); } });
+      { stdout:x=>{ logBuf+=synBytesToStr(x); }, stderr:x=>{ logBuf+=synBytesToStr(x); },
+        fetchProgress:({totalLength,doneLength})=>{
+          const p = totalLength ? Math.floor(100*doneLength/totalLength) : 0;
+          synInfo(p<100 ? 'Downloading Yosys: '+p+'% (first time only)' : 'Starting Yosys…');
+        } });
     const raw = out && out['out.json'];
     if(!raw) throw new Error('no netlist produced');
     const netlist = JSON.parse(synBytesToStr(raw));

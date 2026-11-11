@@ -132,7 +132,7 @@ curl -L -o elk.bundled.js       https://nturley.github.io/netlistsvg/elk.bundled
 curl -L -o netlistsvg.bundle.js https://nturley.github.io/netlistsvg/built/netlistsvg.bundle.js
 ```
 
-The simulator runs fully offline. The **Synthesize** tab additionally needs those two local bundles for rendering, and fetches the Yosys WebAssembly (~8 MB) from a CDN the first time you synthesize (cached by the browser thereafter).
+The simulator runs fully offline. The **Synthesize** tab additionally needs those two local bundles for rendering, and fetches the Yosys WebAssembly (Yosys 0.66.1164, ~12 MB) from a CDN the first time you synthesize (cached by the browser thereafter).
 
 ```bash
 python3 -m http.server 8090
