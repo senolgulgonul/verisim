@@ -1,0 +1,45 @@
+diff --git a/t-dll.cc b/t-dll.cc
+index 1d130db..9521b09 100644
+--- a/t-dll.cc
++++ b/t-dll.cc
+@@ -599,7 +599,7 @@ bool dll_target::start_design(const Design*des)
+ {
+       const char*dll_path_ = des->get_flag("DLL");
+ 
+-      dll_ = ivl_dlopen(dll_path_, false);
++      dll_ = (ivl_dll_t)1; (void)dll_path_; /* WASM: static target */
+ 
+       if ((dll_ == 0) && (dll_path_[0] != '/')) {
+ 	    size_t len = strlen(basedir) + 1 + strlen(dll_path_) + 1;
+@@ -644,7 +644,7 @@ bool dll_target::start_design(const Design*des)
+ 	    add_root(*cur);
+       }
+ 
+-      target_ = reinterpret_cast<target_design_f>(ivl_dlsym(dll_, LU "target_design" TU));
++      target_ = &target_design; /* WASM: statically linked tgt-vvp */
+       if (target_ == 0) {
+ 	    cerr << dll_path_ << ": error: target_design entry "
+ 		  "point is missing." << endl;
+diff --git a/vvp/vpi_modules.cc b/vvp/vpi_modules.cc
+index 9257447..b1b639d 100644
+--- a/vvp/vpi_modules.cc
++++ b/vvp/vpi_modules.cc
+@@ -142,8 +142,18 @@ void load_module_delete(void)
+       dll_list_cnt = 0;
+ }
+ 
++extern "C" void (*vlog_startup_routines[])(void);
+ void vpip_load_module(const char*name)
+ {
++      { const char*wbase=strrchr(name,'/'); wbase=wbase?wbase+1:name;
++        if(strcmp(wbase,"system")==0||strcmp(wbase,"system.vpi")==0){
++              static bool wasm_done=false;
++              if(!wasm_done){ wasm_done=true; vpi_mode_flag=VPI_MODE_REGISTER;
++                    for(unsigned wi=0; vlog_startup_routines[wi]; wi+=1) vlog_startup_routines[wi]();
++                    vpi_mode_flag=VPI_MODE_NONE; }
++              return; }
++        return; }
++
+       struct stat sb;
+       int rc;
+       bool export_flag = false;
