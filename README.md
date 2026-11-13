@@ -139,6 +139,24 @@ python3 -m http.server 8090
 # then open http://localhost:8090/
 ```
 
+## Building the WebAssembly modules
+
+Everything needed to rebuild `ivlpp`, `ivl` and `vvp` is in [`build/`](build/):
+
+| File | Purpose |
+|---|---|
+| `iverilog-wasm.patch` | The changes to Icarus Verilog (two files): the `vvp` code generator is called directly instead of through `dlopen`, and the `system.vpi` startup routines are run from inside `vvp`. |
+| `build.sh` | Fetches Emscripten 6.0.0 and Icarus Verilog at commit `c7530db`, applies the patch, compiles, and links the three modules. |
+| `test-e2e.mjs` | Smoke test: compiles and simulates a small design with the built modules under Node. |
+
+```bash
+# host packages: git make autoconf gperf bison flex python3
+bash build/build.sh                 # output in build/work/out
+WORK=/tmp/verisim bash build/build.sh   # or choose the work directory
+```
+
+Copy the resulting `ivlpp`, `ivl` and `vvp` `.js` / `.wasm` files next to `index.html`.
+
 ## License & attribution
 
 VeriSim bundles WebAssembly binaries built from **Icarus Verilog**, which is licensed under the **GNU General Public License, version 2 or later**. The compiled modules (`ivl.wasm`, `vvp.wasm`, `ivlpp.wasm`) are derivative works of that source, so they remain under the GPL, and this project is distributed under GPL-compatible terms.
@@ -146,7 +164,7 @@ VeriSim bundles WebAssembly binaries built from **Icarus Verilog**, which is lic
 - Icarus Verilog © Stephen Williams and contributors — https://github.com/steveicarus/iverilog
 - Full license text: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
-The corresponding Icarus Verilog source (and the Emscripten build steps / patches used to produce the modules) is the `master` branch of the upstream repository at version 14.0 (devel), commit `c7530db` (2026-05-31).
+The corresponding source is Icarus Verilog `master` at commit `c7530db` (2026-05-31, version 14.0 devel) plus the small patch in [`build/iverilog-wasm.patch`](build/iverilog-wasm.patch). See [Building the WebAssembly modules](#building-the-webassembly-modules).
 
 The **Synthesize** feature relies on three additional open-source projects, loaded as-is (not modified):
 
